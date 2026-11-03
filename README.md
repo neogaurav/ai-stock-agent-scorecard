@@ -25,7 +25,7 @@ agent report ─▶ extract calls ─▶ seal (salted hash → chain) ─▶ nig
 | You use | Install |
 |---|---|
 | Python / CLI | `pip install "thesis-ledger[yfinance]"` or run without installing: `uvx thesis-ledger --help` |
-| Claude Code | `/plugin marketplace add YOUR_GITHUB/thesis-ledger`, then `/plugin install thesis-ledger@thesis-ledger` |
+| Claude Code | `/plugin marketplace add neogaurav/thesis-ledger`, then `/plugin install thesis-ledger@thesis-ledger` |
 | Any MCP client | `claude mcp add thesis-ledger -- uvx --from "thesis-ledger[mcp]" thesis-ledger mcp` |
 | Just looking | `python examples/demo.py` builds a demo site from synthetic data in `demo-site/` |
 

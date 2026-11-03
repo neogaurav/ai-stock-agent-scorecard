@@ -9,7 +9,7 @@ description = "Lookahead-free, verifiable track record for AI stock-research age
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Gaurav" }]
+authors = [{ name = "Gaurav (neogaurav)" }]
 keywords = ["llm", "agents", "trading", "evaluation", "backtesting", "mcp", "calibration"]
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -24,6 +24,10 @@ llm = ["anthropic>=0.40"]
 mcp = ["mcp>=1.2"]
 all = ["yfinance>=0.2.40", "anthropic>=0.40", "mcp>=1.2"]
 dev = ["pytest>=8"]
+
+[project.urls]
+Homepage = "https://github.com/neogaurav/thesis-ledger"
+Issues = "https://github.com/neogaurav/thesis-ledger/issues"
 
 [project.scripts]
 thesis-ledger = "thesis_ledger.cli:main"

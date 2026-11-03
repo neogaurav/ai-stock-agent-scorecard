@@ -26,6 +26,6 @@ jobs:
       - uses: peaceiris/actions-gh-pages@v4
         with:
           deploy_key: ${{ secrets.SITE_DEPLOY_KEY }}
-          external_repository: YOUR_GITHUB/thesis-ledger-site
+          external_repository: neogaurav/thesis-ledger-site
           publish_branch: gh-pages
           publish_dir: ./site
