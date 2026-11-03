@@ -125,7 +125,9 @@ def build_site(ledger: Ledger, outcomes: dict[str, Outcome], out_dir: str | Path
     head = chain[-1]["hash"] if chain else "(empty)"
     status = ("<span class='pill good'>Chain verified</span>" if verify.ok
               else f"<span class='pill bad'>Verification failed: {len(verify.errors)} issue(s)</span>")
-    body = [f"<p class='sub'>{status} &nbsp;{len(chain)} sealed · {len(reveals)} revealed · head <code>{head[:16]}</code> · updated {e(as_of)}</p>"]
+    notice = cfg.get("notice")
+    body = [f"<div class='card' style='border-color:var(--warn)'><span class='pill warn'>Note</span> {e(notice)}</div>"] if notice else []
+    body += [f"<p class='sub'>{status} &nbsp;{len(chain)} sealed · {len(reveals)} revealed · head <code>{head[:16]}</code> · updated {e(as_of)}</p>"]
     body.append("<div class='grid'>"
                 f"<div class='m'><p class='ml'>Predictions sealed</p><p class='mv num'>{len(chain)}</p></div>"
                 f"<div class='m'><p class='ml'>Resolved (revealed)</p><p class='mv num'>{sc['totals']['resolved']}</p></div>"

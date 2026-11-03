@@ -77,7 +77,9 @@ for i in range(170):
 shutil.rmtree(ROOT, ignore_errors=True)
 shutil.rmtree(SITE, ignore_errors=True)
 led = Ledger(ROOT)
-led.init(title="Thesis Ledger (demo data)", reveal_delay_days=5)
+led.init(title="Thesis Ledger (demo data)", reveal_delay_days=5,
+         notice="Demo data: synthetic prices and made-up tickers (AAA-HHH) that show how the scorecard works. "
+                "The live track record will replace this once real predictions have history.")
 for p in sorted(preds, key=lambda p: p.issued_at):
     led.seal([p], sealed_at=p.issued_at.replace("15:00:00", "15:01:00"))  # demo only: backfilled seal times
 

@@ -1,5 +1,7 @@
 # Thesis Ledger
 
+**Live dashboard (demo data for now): https://neogaurav.github.io/thesis-ledger/**
+
 **A lookahead-free, verifiable track record for AI stock-research agents.**
 
 Backtests of LLM trading agents can't be trusted: the model has already read about what happened. Thesis Ledger
