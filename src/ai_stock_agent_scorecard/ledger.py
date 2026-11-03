@@ -34,6 +34,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "reveal_on_resolve": True,
     "author": "",
     "positions_file": "positions.json",
+    # Refuse to seal a call issued longer ago than this: a call sealed late could
+    # already know part of its outcome. 0 disables the check (demo/backfill only).
+    "max_seal_lag_minutes": 120,
 }
 
 
@@ -130,12 +133,16 @@ class Ledger:
         prev = chain[-1]["hash"] if chain else GENESIS
         seq = len(chain)
         stamp = sealed_at or utc_now_iso()
+        lag = int(self.config.get("max_seal_lag_minutes") or 0)
         links, private_rows = [], []
         for p in preds:
             if p.id in known_ids:
                 continue  # idempotent: re-sealing the same call is a no-op
             if parse_iso(p.issued_at) > parse_iso(stamp) + timedelta(minutes=5):
                 raise ValueError(f"{p.id}: issued_at is after the seal time")
+            if lag and parse_iso(stamp) - parse_iso(p.issued_at) > timedelta(minutes=lag):
+                raise ValueError(f"{p.id}: issued {p.issued_at}, more than {lag} min before sealing; "
+                                 "sealing it now would let hindsight in")
             record = p.to_dict()
             salt = secrets.token_hex(16)
             commit = commitment_for(record, salt)

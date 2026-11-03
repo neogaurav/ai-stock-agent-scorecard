@@ -3,6 +3,7 @@
 #   - clones the private data repo and the public site repo into $CodeDir
 #   - initialises the ledger and writes the two job scripts
 #   - registers two scheduled tasks: ingest every 15 min, nightly at 8:30 PM
+# Only reports written AFTER setup are sealed; existing reports are marked seen, never backfilled.
 # Re-running is safe.
 param(
   [string]$CodeDir   = "C:\Code",
@@ -31,14 +32,14 @@ New-Item -ItemType Directory -Force -Path (Join-Path $Data "scripts") | Out-Null
 Write-Host "4/5 Writing job scripts ..."
 $ingest = @"
 `$ErrorActionPreference = "Stop"
-& "$py" -m ai_stock_agent_scorecard.cli --root "$Data" ingest "$Reports"
+& "$py" -m ai_stock_agent_scorecard.cli --root "$Data" ingest "$Reports" --pattern decision.md --pattern trader.md
 git -C "$Data" add -A
 git -C "$Data" diff --cached --quiet; if (`$LASTEXITCODE -ne 0) { git -C "$Data" commit -q -m "seal `$(Get-Date -Format s)"; git -C "$Data" push -q }
 "@
 $nightly = @"
 `$ErrorActionPreference = "Stop"
 Start-Transcript -Path "$Data\scripts\nightly.log" -Append | Out-Null
-& "$py" -m ai_stock_agent_scorecard.cli --root "$Data" ingest "$Reports"
+& "$py" -m ai_stock_agent_scorecard.cli --root "$Data" ingest "$Reports" --pattern decision.md --pattern trader.md
 & "$py" -m ai_stock_agent_scorecard.cli --root "$Data" nightly --out "$Data\site_build"
 & "$py" -m ai_stock_agent_scorecard.cli --root "$Data" verify
 git -C "$Data" add -A

@@ -10,6 +10,13 @@ from ai_stock_agent_scorecard.score import grade_all
 from ai_stock_agent_scorecard.site import build_site
 
 
+def mk(path, **cfg):
+    """Ledger with the hindsight guard off, for tests that seal historical calls."""
+    led = Ledger(path)
+    led.init(max_seal_lag_minutes=0, **cfg)
+    return led
+
+
 def pred(**kw):
     base = dict(ticker="MU", direction="long", stop=90, target=120, horizon_days=10, confidence=0.6,
                 price_at_issue=100, issued_at="2026-10-01T14:00:00+00:00", source_agent="technicals")
@@ -38,7 +45,7 @@ def test_validation_rejects_bad_levels():
 
 # ---------------------------------------------------------------- chain
 def test_seal_verify_and_tamper(tmp_path):
-    led = Ledger(tmp_path)
+    led = mk(tmp_path)
     led.seal([pred(), pred(ticker="LRCX")])
     assert led.verify().ok and len(led.chain()) == 2
     led.seal([pred()])  # idempotent
@@ -54,8 +61,7 @@ def test_seal_verify_and_tamper(tmp_path):
 
 
 def test_commit_reveal(tmp_path):
-    led = Ledger(tmp_path)
-    led.init(reveal_delay_days=5)
+    led = mk(tmp_path, reveal_delay_days=5)
     sealed = datetime(2026, 10, 1, 15, tzinfo=timezone.utc)
     led.seal([pred(), pred(ticker="VST", issued_at="2026-10-01T14:30:00+00:00")], sealed_at=sealed.isoformat())
     assert "MU" not in led.chain_path.read_text()  # public chain leaks nothing
@@ -164,8 +170,7 @@ def test_ingest_is_idempotent(tmp_path):
 
 
 def test_site_only_shows_revealed(tmp_path):
-    led = Ledger(tmp_path / "ledger")
-    led.init(reveal_delay_days=0)
+    led = mk(tmp_path / "ledger", reveal_delay_days=0)
     p1, p2 = pred(claim="revealed one"), pred(ticker="ARRY", claim="secret one")
     led.seal([p1], sealed_at="2026-10-01T15:00:00+00:00")
     led.reveal_due(now=datetime(2026, 10, 2, tzinfo=timezone.utc))
@@ -181,10 +186,38 @@ def test_site_only_shows_revealed(tmp_path):
 
 
 def test_empty_ledger_builds_site(tmp_path):
-    led = Ledger(tmp_path / "ledger")
-    led.init()
+    led = mk(tmp_path / "ledger")
     out = build_site(led, {}, tmp_path / "site", positions={})
     assert "Starting soon" in (out / "index.html").read_text()
     led.seal([pred()])
     out = build_site(led, {}, tmp_path / "site", positions={})
     assert "Sealed, awaiting reveal (1)" in (out / "index.html").read_text()
+
+
+def test_late_seal_is_refused(tmp_path):
+    led = Ledger(tmp_path)
+    led.init()  # default guard: 120 minutes
+    with pytest.raises(ValueError, match="hindsight"):
+        led.seal([pred()], sealed_at="2026-10-01T18:00:00+00:00")
+    assert len(led.seal([pred()], sealed_at="2026-10-01T15:00:00+00:00")) == 1
+
+
+def test_ingest_refuses_old_reports_and_rewrites(tmp_path):
+    import os
+    reports = tmp_path / "results" / "MU" / "2026-10-22" / "5_portfolio"
+    reports.mkdir(parents=True)
+    old = reports / "decision.md"
+    old.write_text(REPORT)
+    os.utime(old, (1_700_000_000, 1_700_000_000))  # a 2023 file: must not be backfilled
+    led = Ledger(tmp_path / "ledger")
+    led.init()
+    s = ingest_folder(tmp_path / "results", led, patterns=("decision.md",))
+    assert s["sealed"] == 0 and s["too_old"] == 1
+
+    new = tmp_path / "results" / "MU" / "2026-11-03" / "5_portfolio"
+    new.mkdir(parents=True)
+    (new / "decision.md").write_text(REPORT)
+    assert ingest_folder(tmp_path / "results", led, patterns=("decision.md",))["sealed"] == 1
+    (new / "decision.md").write_text(REPORT.replace("Pullback to support", "rewritten later"))
+    assert ingest_folder(tmp_path / "results", led, patterns=("decision.md",))["sealed"] == 0
+    assert len(led.chain()) == 1

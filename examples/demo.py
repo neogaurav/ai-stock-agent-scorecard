@@ -77,7 +77,7 @@ for i in range(170):
 shutil.rmtree(ROOT, ignore_errors=True)
 shutil.rmtree(SITE, ignore_errors=True)
 led = Ledger(ROOT)
-led.init(title="AI Stock Agent Scorecard (demo data)", reveal_delay_days=5,
+led.init(title="AI Stock Agent Scorecard (demo data)", reveal_delay_days=5, max_seal_lag_minutes=0,
          notice="Demo data: synthetic prices and made-up tickers (AAA-HHH) that show how the scorecard works. "
                 "The live track record will replace this once real predictions have history.")
 for p in sorted(preds, key=lambda p: p.issued_at):

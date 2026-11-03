@@ -60,8 +60,10 @@ def cmd_seal(args):
 
 
 def cmd_ingest(args):
-    summary = ingest_folder(args.folder, _ledger(args), use_llm=args.llm, git_commit=args.git)
-    print(f"Scanned {summary['files']} new/changed file(s), sealed {summary['sealed']} prediction(s)")
+    patterns = tuple(args.pattern) if args.pattern else ("*.md", "*.txt")
+    summary = ingest_folder(args.folder, _ledger(args), use_llm=args.llm, patterns=patterns, git_commit=args.git)
+    print(f"Scanned {summary['files']} new/changed file(s), sealed {summary['sealed']} prediction(s)"
+          + (f", refused {summary['too_old']} too old to seal fairly" if summary["too_old"] else ""))
     for err in summary["errors"]:
         print(f"skipped: {err}", file=sys.stderr)
 
@@ -140,6 +142,7 @@ def main(argv=None):
     p = sub.add_parser("ingest", help="seal predictions from every new report in a folder")
     p.add_argument("folder")
     p.add_argument("--llm", action="store_true", help="fall back to LLM extraction for free-form reports")
+    p.add_argument("--pattern", action="append", help="file glob to scan (repeatable), e.g. decision.md")
     p.add_argument("--git", action="store_true")
     p.set_defaults(fn=cmd_ingest)
 

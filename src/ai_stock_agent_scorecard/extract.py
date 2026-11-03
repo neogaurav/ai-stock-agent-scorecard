@@ -90,16 +90,27 @@ def extract_llm(text: str, defaults: dict[str, Any] | None = None,
     return preds, errors
 
 
+def _stable_id(p: Prediction, rel: str, index: int) -> str:
+    """Same file + same block -> same id, so a rewritten report is never sealed twice."""
+    h = hashlib.sha256(f"{rel}|{p.source_agent}|{index}".encode()).hexdigest()[:8]
+    return f"{p.ticker}-{p.source_agent}-{h}"
+
+
 def ingest_folder(folder: str | Path, ledger, *, use_llm: bool = False, patterns=("*.md", "*.txt"),
-                  git_commit: bool = False) -> dict[str, Any]:
+                  git_commit: bool = False, now: datetime | None = None) -> dict[str, Any]:
     """Seal predictions from every new or changed report in ``folder``.
 
-    A file is skipped when its content hash was ingested before, so the watcher
-    can run as often as you like.
+    * A file whose content was ingested before is skipped, so this can run every few minutes.
+    * Each block gets an id derived from its file path, so a report that is rewritten later
+      (a resumed run) cannot replace a call that was already sealed.
+    * Calls issued more than ``max_seal_lag_minutes`` before now are refused, not backfilled.
+      On the first run this simply marks your existing reports as seen.
     """
     folder = Path(folder)
+    now = now or datetime.now(timezone.utc)
+    lag = int(ledger.config.get("max_seal_lag_minutes") or 0)
     seen: dict[str, str] = json.loads(ledger.ingested_path.read_text()) if ledger.ingested_path.exists() else {}
-    summary = {"files": 0, "sealed": 0, "errors": []}
+    summary = {"files": 0, "sealed": 0, "too_old": 0, "errors": []}
     batch: list[Prediction] = []
     for pattern in patterns:
         for path in sorted(folder.rglob(pattern)):
@@ -107,16 +118,24 @@ def ingest_folder(folder: str | Path, ledger, *, use_llm: bool = False, patterns
             digest = hashlib.sha256(text.encode()).hexdigest()
             if seen.get(str(path)) == digest:
                 continue
+            seen[str(path)] = digest
+            summary["files"] += 1
+            if not BLOCK_RE.search(text) and not use_llm:
+                continue
+            rel = path.relative_to(folder).as_posix()
             mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).replace(microsecond=0)
-            defaults = {"issued_at": mtime.isoformat(), "thesis_run": path.stem}
+            defaults = {"issued_at": mtime.isoformat(), "thesis_run": str(Path(rel).parent.as_posix())}
             preds, errs = extract_blocks(text, defaults)
             if not preds and use_llm:
                 preds, errs = extract_llm(text, defaults)
-            batch.extend(preds)
-            summary["errors"].extend(f"{path.name}: {e}" for e in errs)
-            seen[str(path)] = digest
-            summary["files"] += 1
-    links = ledger.seal(batch, git_commit=git_commit)
+            summary["errors"].extend(f"{rel}: {e}" for e in errs)
+            for i, p in enumerate(preds):
+                p.id = _stable_id(p, rel, i)
+                if lag and (now - datetime.fromisoformat(p.issued_at)).total_seconds() > lag * 60:
+                    summary["too_old"] += 1
+                    continue
+                batch.append(p)
+    links = ledger.seal(batch, sealed_at=now.replace(microsecond=0).isoformat(), git_commit=git_commit)
     summary["sealed"] = len(links)
     ledger.ingested_path.parent.mkdir(parents=True, exist_ok=True)
     ledger.ingested_path.write_text(json.dumps(seen, indent=2))
