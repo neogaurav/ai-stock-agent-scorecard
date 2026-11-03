@@ -1,4 +1,4 @@
-"""thesis-ledger command line."""
+"""agent-scorecard command line."""
 from __future__ import annotations
 
 import argparse
@@ -117,18 +117,18 @@ def cmd_nightly(args):
 def cmd_mcp(args):
     from .mcp_server import run
 
-    os.environ.setdefault("THESIS_LEDGER_ROOT", args.root)
+    os.environ.setdefault("SCORECARD_ROOT", args.root)
     run()
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="thesis-ledger", description="Lookahead-free track record for AI research agents")
+    ap = argparse.ArgumentParser(prog="agent-scorecard", description="Lookahead-free track record for AI research agents")
     ap.add_argument("--version", action="version", version=__version__)
-    ap.add_argument("--root", default=os.environ.get("THESIS_LEDGER_ROOT", "ledger"), help="ledger directory")
+    ap.add_argument("--root", default=os.environ.get("SCORECARD_ROOT", "ledger"), help="ledger directory")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("init", help="create a ledger")
-    p.add_argument("--title", default="Thesis Ledger")
+    p.add_argument("--title", default="AI Stock Agent Scorecard")
     p.add_argument("--reveal-delay-days", type=int, default=5)
     p.set_defaults(fn=cmd_init)
 

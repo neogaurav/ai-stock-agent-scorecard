@@ -23,7 +23,7 @@ class PriceProvider(Protocol):
 
 
 class YFinanceProvider:
-    """Free Yahoo data via yfinance (``pip install thesis-ledger[yfinance]``).
+    """Free Yahoo data via yfinance (``pip install ai-stock-agent-scorecard[yfinance]``).
 
     Prices are used only to grade outcomes; they are never written to the
     public site, which keeps redistribution of vendor data out of the picture.
@@ -33,7 +33,7 @@ class YFinanceProvider:
         try:
             import yfinance  # noqa: F401
         except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("yfinance is not installed: pip install 'thesis-ledger[yfinance]'") from exc
+            raise RuntimeError("yfinance is not installed: pip install 'ai-stock-agent-scorecard[yfinance]'") from exc
         self._cache: dict[tuple[str, date, date], list[Bar]] = {}
 
     def daily_bars(self, ticker: str, start: date, end: date) -> list[Bar]:  # pragma: no cover - network

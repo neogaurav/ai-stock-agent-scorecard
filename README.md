@@ -1,10 +1,10 @@
-# Thesis Ledger
+# AI Stock Agent Scorecard
 
-**Live dashboard (demo data for now): https://neogaurav.github.io/thesis-ledger/**
+**Live dashboard (demo data for now): https://neogaurav.github.io/ai-stock-agent-scorecard/**
 
 **A lookahead-free, verifiable track record for AI stock-research agents.**
 
-Backtests of LLM trading agents can't be trusted: the model has already read about what happened. Thesis Ledger
+Backtests of LLM trading agents can't be trusted: the model has already read about what happened. AI Stock Agent Scorecard
 grades agents only on predictions that were **sealed before the outcome**, so every number is lookahead-free
 by construction. Anyone can check that, without trusting you.
 
@@ -26,18 +26,18 @@ agent report ─▶ extract calls ─▶ seal (salted hash → chain) ─▶ nig
 
 | You use | Install |
 |---|---|
-| Python / CLI | `pip install "thesis-ledger[yfinance]"` or run without installing: `uvx thesis-ledger --help` |
-| Claude Code | `/plugin marketplace add neogaurav/thesis-ledger`, then `/plugin install thesis-ledger@thesis-ledger` |
-| Any MCP client | `claude mcp add thesis-ledger -- uvx --from "thesis-ledger[mcp]" thesis-ledger mcp` |
+| Python / CLI | `pip install "ai-stock-agent-scorecard[yfinance]"` or run without installing: `uvx --from ai-stock-agent-scorecard agent-scorecard --help` |
+| Claude Code | `/plugin marketplace add neogaurav/ai-stock-agent-scorecard`, then `/plugin install ai-stock-agent-scorecard@ai-stock-agent-scorecard` |
+| Any MCP client | `claude mcp add agent-scorecard -- uvx --from "ai-stock-agent-scorecard[mcp]" agent-scorecard mcp` |
 | Just looking | `python examples/demo.py` builds a demo site from synthetic data in `demo-site/` |
 
 ## Quick start
 
 ```bash
-thesis-ledger --root ledger init --title "My agents"
-thesis-ledger --root ledger ingest path/to/agent/reports     # seal calls from ```prediction blocks
-thesis-ledger --root ledger nightly --out site               # grade → reveal → build site
-thesis-ledger --root ledger verify
+agent-scorecard --root ledger init --title "My agents"
+agent-scorecard --root ledger ingest path/to/agent/reports     # seal calls from ```prediction blocks
+agent-scorecard --root ledger nightly --out site               # grade → reveal → build site
+agent-scorecard --root ledger verify
 ```
 
 Have your agents end each report with a block like this. Extraction is then deterministic:
@@ -50,14 +50,14 @@ Have your agents end each report with a block like this. Extraction is then dete
 ```
 ````
 
-For free-form reports, `ingest --llm` falls back to LLM extraction (`pip install "thesis-ledger[llm]"`, `ANTHROPIC_API_KEY`).
+For free-form reports, `ingest --llm` falls back to LLM extraction (`pip install "ai-stock-agent-scorecard[llm]"`, `ANTHROPIC_API_KEY`).
 
 ## Recommended setup (two repos, both free)
 
-1. **`ledger-data` (private).** Holds `private/` (records and salts) and `public/` (chain and reveals).
+1. **`scorecard-data` (private).** Holds `private/` (records and salts) and `public/` (chain and reveals).
    A scheduled job on your machine runs `ingest --git` and pushes every 15 minutes, so GitHub records the time of
    each seal. See `examples/windows/`.
-2. **`thesis-ledger-site` (public).** Contains only the built site, served by GitHub Pages.
+2. **`ai-stock-agent-scorecard-site` (public).** Contains only the built site, served by GitHub Pages.
    `examples/data-repo/.github/workflows/nightly.yml` grades, reveals and deploys it every night.
 
 The data repo must be private, because publishing `private/` would reveal calls early.

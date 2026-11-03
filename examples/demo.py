@@ -12,10 +12,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from thesis_ledger import Ledger, Prediction  # noqa: E402
-from thesis_ledger.prices import Bar, StaticProvider  # noqa: E402
-from thesis_ledger.score import grade_all  # noqa: E402
-from thesis_ledger.site import build_site  # noqa: E402
+from ai_stock_agent_scorecard import Ledger, Prediction  # noqa: E402
+from ai_stock_agent_scorecard.prices import Bar, StaticProvider  # noqa: E402
+from ai_stock_agent_scorecard.score import grade_all  # noqa: E402
+from ai_stock_agent_scorecard.site import build_site  # noqa: E402
 
 random.seed(7)
 ROOT, SITE = Path("demo-ledger"), Path("demo-site")
@@ -77,7 +77,7 @@ for i in range(170):
 shutil.rmtree(ROOT, ignore_errors=True)
 shutil.rmtree(SITE, ignore_errors=True)
 led = Ledger(ROOT)
-led.init(title="Thesis Ledger (demo data)", reveal_delay_days=5,
+led.init(title="AI Stock Agent Scorecard (demo data)", reveal_delay_days=5,
          notice="Demo data: synthetic prices and made-up tickers (AAA-HHH) that show how the scorecard works. "
                 "The live track record will replace this once real predictions have history.")
 for p in sorted(preds, key=lambda p: p.issued_at):

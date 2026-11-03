@@ -1,6 +1,6 @@
 """MCP server so any agent (Claude Code, Claude Desktop, Cursor...) can write to the ledger.
 
-Run with ``thesis-ledger mcp``. The ledger directory comes from ``THESIS_LEDGER_ROOT``.
+Run with ``agent-scorecard mcp``. The ledger directory comes from ``SCORECARD_ROOT``.
 """
 from __future__ import annotations
 
@@ -17,13 +17,13 @@ try:  # mcp >= 2
 except ImportError:  # mcp 1.x
     from mcp.server.fastmcp import FastMCP as _Server  # type: ignore
 
-server = _Server("thesis-ledger", instructions=(
+server = _Server("ai-stock-agent-scorecard", instructions=(
     "Use log_prediction whenever an analysis states a falsifiable call with a stop and a target. "
     "Never edit or re-log a prediction to change its levels; log a new one instead."))
 
 
 def _ledger() -> Ledger:
-    led = Ledger(os.environ.get("THESIS_LEDGER_ROOT", "ledger"))
+    led = Ledger(os.environ.get("SCORECARD_ROOT", "ledger"))
     led.init()
     return led
 

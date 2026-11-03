@@ -1,11 +1,11 @@
 {
-  "name": "thesis-ledger",
+  "name": "ai-stock-agent-scorecard",
   "description": "Lookahead-free, verifiable track record for AI stock-research agents",
   "owner": { "name": "Gaurav" },
   "plugins": [
     {
-      "name": "thesis-ledger",
-      "source": "./plugins/thesis-ledger",
+      "name": "ai-stock-agent-scorecard",
+      "source": "./plugins/ai-stock-agent-scorecard",
       "description": "Seal falsifiable predictions from your research agents and grade them honestly"
     }
   ]

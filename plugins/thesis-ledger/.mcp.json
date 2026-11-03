@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "thesis-ledger": {
-      "command": "uvx",
-      "args": ["--from", "thesis-ledger[mcp]", "thesis-ledger", "mcp"],
-      "env": { "THESIS_LEDGER_ROOT": "${HOME}/thesis-ledger-data" }
-    }
-  }
-}

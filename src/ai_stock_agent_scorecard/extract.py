@@ -13,7 +13,7 @@ Two paths:
        ```
 
 2. **LLM extraction (fallback).** For free-form reports, an LLM pulls out
-   checkable calls into the same schema. Needs ``pip install thesis-ledger[llm]``
+   checkable calls into the same schema. Needs ``pip install ai-stock-agent-scorecard[llm]``
    and ``ANTHROPIC_API_KEY``.
 """
 from __future__ import annotations
@@ -29,7 +29,7 @@ from typing import Any
 
 from .schema import Prediction, ValidationError
 
-BLOCK_RE = re.compile(r"```(?:prediction|thesis-ledger)\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
+BLOCK_RE = re.compile(r"```(?:prediction|scorecard)\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
 FIELD_NAMES = {f.name for f in fields(Prediction)}
 
 
@@ -72,10 +72,10 @@ def extract_llm(text: str, defaults: dict[str, Any] | None = None,
     try:
         import anthropic
     except ImportError as exc:
-        raise RuntimeError("pip install 'thesis-ledger[llm]' to use LLM extraction") from exc
+        raise RuntimeError("pip install 'ai-stock-agent-scorecard[llm]' to use LLM extraction") from exc
     client = anthropic.Anthropic()
     msg = client.messages.create(
-        model=model or os.environ.get("THESIS_LEDGER_MODEL", "claude-sonnet-5-5"),
+        model=model or os.environ.get("SCORECARD_MODEL", "claude-sonnet-5-5"),
         max_tokens=2000,
         messages=[{"role": "user", "content": LLM_PROMPT + text[:150_000]}],
     )

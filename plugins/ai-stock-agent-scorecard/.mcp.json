@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ai-stock-agent-scorecard": {
+      "command": "uvx",
+      "args": ["--from", "ai-stock-agent-scorecard[mcp]", "agent-scorecard", "mcp"],
+      "env": { "SCORECARD_ROOT": "${HOME}/scorecard-data" }
+    }
+  }
+}

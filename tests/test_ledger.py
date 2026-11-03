@@ -3,11 +3,11 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from thesis_ledger import Ledger, Prediction, ValidationError, resolve, scorecard
-from thesis_ledger.extract import extract_blocks, ingest_folder
-from thesis_ledger.prices import Bar, StaticProvider
-from thesis_ledger.score import grade_all
-from thesis_ledger.site import build_site
+from ai_stock_agent_scorecard import Ledger, Prediction, ValidationError, resolve, scorecard
+from ai_stock_agent_scorecard.extract import extract_blocks, ingest_folder
+from ai_stock_agent_scorecard.prices import Bar, StaticProvider
+from ai_stock_agent_scorecard.score import grade_all
+from ai_stock_agent_scorecard.site import build_site
 
 
 def pred(**kw):

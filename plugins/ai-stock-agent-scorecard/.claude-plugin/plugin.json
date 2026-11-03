@@ -1,5 +1,5 @@
 {
-  "name": "thesis-ledger",
+  "name": "ai-stock-agent-scorecard",
   "version": "0.1.0",
   "description": "Seal falsifiable predictions from AI research agents into a commit-reveal hash chain and grade them against real prices.",
   "author": { "name": "Gaurav" },

@@ -3,7 +3,7 @@ requires = ["hatchling>=1.24"]
 build-backend = "hatchling.build"
 
 [project]
-name = "thesis-ledger"
+name = "ai-stock-agent-scorecard"
 version = "0.1.0"
 description = "Lookahead-free, verifiable track record for AI stock-research agents (commit-reveal hash chain + scorecard)."
 readme = "README.md"
@@ -26,14 +26,14 @@ all = ["yfinance>=0.2.40", "anthropic>=0.40", "mcp>=1.2"]
 dev = ["pytest>=8"]
 
 [project.urls]
-Homepage = "https://github.com/neogaurav/thesis-ledger"
-Issues = "https://github.com/neogaurav/thesis-ledger/issues"
+Homepage = "https://github.com/neogaurav/ai-stock-agent-scorecard"
+Issues = "https://github.com/neogaurav/ai-stock-agent-scorecard/issues"
 
 [project.scripts]
-thesis-ledger = "thesis_ledger.cli:main"
+agent-scorecard = "ai_stock_agent_scorecard.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/thesis_ledger"]
+packages = ["src/ai_stock_agent_scorecard"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

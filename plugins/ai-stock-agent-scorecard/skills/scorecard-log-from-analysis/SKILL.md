@@ -1,9 +1,9 @@
 ---
-name: ledger-log-from-analysis
-description: Use right after any stock or options analysis that states a trade idea with a stop (or invalidation level) and a target. Logs each falsifiable call to the Thesis Ledger so it can be graded later.
+name: scorecard-log-from-analysis
+description: Use right after any stock or options analysis that states a trade idea with a stop (or invalidation level) and a target. Logs each falsifiable call to the AI Stock Agent Scorecard so it can be graded later.
 ---
 
-# Log falsifiable calls to the Thesis Ledger
+# Log falsifiable calls to the AI Stock Agent Scorecard
 
 When an analysis in this session ends with a concrete trade idea, log it before moving on.
 
@@ -16,7 +16,7 @@ When an analysis in this session ends with a concrete trade idea, log it before 
    old call with new levels; a revised view is a new prediction.
 4. Tell the user in one line how many calls were sealed and show the short commitment hash.
 
-If the `log_prediction` tool is unavailable, append a fenced block to the report instead so `thesis-ledger ingest` picks it up:
+If the `log_prediction` tool is unavailable, append a fenced block to the report instead so `agent-scorecard ingest` picks it up:
 
 ```prediction
 {"ticker": "MU", "direction": "long", "entry": 228.5, "stop": 214, "target": 262, "horizon_days": 20,

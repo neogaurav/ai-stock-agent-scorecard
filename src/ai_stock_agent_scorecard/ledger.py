@@ -29,7 +29,7 @@ from .schema import Prediction, canonical_json, parse_iso, utc_now_iso
 GENESIS = "0" * 64
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "title": "Thesis Ledger",
+    "title": "AI Stock Agent Scorecard",
     "reveal_delay_days": 5,
     "reveal_on_resolve": True,
     "author": "",

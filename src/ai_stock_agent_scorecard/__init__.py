@@ -1,4 +1,4 @@
-"""Thesis Ledger: a lookahead-free, verifiable track record for AI research agents."""
+"""AI Stock Agent Scorecard: a lookahead-free, verifiable track record for AI research agents."""
 __version__ = "0.1.0"
 
 from .ledger import Ledger, verify_public  # noqa: E402
