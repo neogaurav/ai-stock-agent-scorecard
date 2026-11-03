@@ -24,9 +24,9 @@ DISCLAIMER = (
     "<p><strong>Trading involves substantial risk of loss.</strong> Past accuracy, including the scores shown here, does "
     "not guarantee future results. Predictions may be wrong, outdated, or based on incomplete data. Do your own research "
     "and consult a licensed financial professional before making investment decisions.</p>"
-    "<p><strong>Author positions.</strong> The author may hold, buy, or sell positions in securities discussed here. "
-    "Current author positions are disclosed next to each ticker. Predictions are revealed after a delay and are not "
-    "trading signals.</p>"
+    "<p><strong>Author positions.</strong> The author may hold, buy or sell long or short positions in any security on "
+    "this site at any time, including before and after a call is published. Calls are generated automatically by AI "
+    "agents and are not the author's personal recommendations.</p>"
     "<p>This site is free, is not a subscription service, and does not provide personalized advice. No compensation is "
     "received from any company discussed.</p>"
 )
@@ -105,8 +105,9 @@ def build_site(ledger: Ledger, outcomes: dict[str, Outcome], out_dir: str | Path
     (out / "data").mkdir(parents=True, exist_ok=True)
     now = now or datetime.now(timezone.utc)
     as_of = now.date().isoformat()
+    badges = bool(cfg.get("position_badges"))  # off: rely on the blanket disclosure in the footer
     if positions is None:
-        positions = load_positions(ledger.root / cfg["positions_file"])
+        positions = load_positions(ledger.root / cfg["positions_file"]) if badges else {}
 
     chain, reveals = ledger.chain(), ledger.reveals()
     revealed = [Prediction.from_dict(r["record"]) for r in reveals]
@@ -165,7 +166,8 @@ def build_site(ledger: Ledger, outcomes: dict[str, Outcome], out_dir: str | Path
             cls, label = STATUS_PILL.get(r["status"], ("neutral", r["status"]))
             if r.get("r") is not None and r["status"] in ("TARGET_HIT", "STOPPED", "EXPIRED"):
                 label = f"{label} {r['r']:+.1f}R"
-            rows.append(f"<tr><td><strong>{e(r['ticker'])}</strong> <span class='sub'>{e(r['direction'])}</span><br>{position_badge(r['ticker'], positions, as_of)}</td>"
+            badge = f"<br>{position_badge(r['ticker'], positions, as_of)}" if badges else ""
+            rows.append(f"<tr><td><strong>{e(r['ticker'])}</strong> <span class='sub'>{e(r['direction'])}</span>{badge}</td>"
                         f"<td>{e(r['agent'])}<br><span class='sub'>{e(r['issued_at'][:10])} · {r['confidence']:.0%}</span></td>"
                         f"<td class='num'>{r['entry']:.2f} / {r['stop']:.2f} / {r['target']:.2f}<br><span class='sub'>{e(r['claim'])}</span></td>"
                         f"<td><span class='pill {cls}'>{e(label)}</span></td></tr>")

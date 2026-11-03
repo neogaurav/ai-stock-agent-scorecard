@@ -170,7 +170,7 @@ def test_ingest_is_idempotent(tmp_path):
 
 
 def test_site_only_shows_revealed(tmp_path):
-    led = mk(tmp_path / "ledger", reveal_delay_days=0)
+    led = mk(tmp_path / "ledger", reveal_delay_days=0, position_badges=True)
     p1, p2 = pred(claim="revealed one"), pred(ticker="ARRY", claim="secret one")
     led.seal([p1], sealed_at="2026-10-01T15:00:00+00:00")
     led.reveal_due(now=datetime(2026, 10, 2, tzinfo=timezone.utc))
@@ -221,3 +221,11 @@ def test_ingest_refuses_old_reports_and_rewrites(tmp_path):
     (new / "decision.md").write_text(REPORT.replace("Pullback to support", "rewritten later"))
     assert ingest_folder(tmp_path / "results", led, patterns=("decision.md",))["sealed"] == 0
     assert len(led.chain()) == 1
+
+
+def test_blanket_disclosure_by_default(tmp_path):
+    led = mk(tmp_path / "ledger", reveal_delay_days=0)
+    led.seal([pred()], sealed_at="2026-10-01T15:00:00+00:00")
+    led.reveal_due(now=datetime(2026, 10, 2, tzinfo=timezone.utc))
+    html = (build_site(led, {}, tmp_path / "site") / "index.html").read_text()
+    assert "Author:" not in html and "long or short positions in any security" in html

@@ -77,8 +77,9 @@ The data repo must be private, because publishing `private/` would reveal calls 
 
 For educational and research purposes only. Predictions are generated automatically by AI agents to evaluate how
 accurate those agents are. They are not investment advice. Trading involves substantial risk of loss. The author may
-hold positions in securities discussed; positions are disclosed per ticker on the site. See the site footer for
-the full text.
+hold, buy or sell long or short positions in any security on the site at any time, including before and after a call
+is published; calls are not the author's personal recommendations. See the site footer for the full text.
+(Per-ticker position badges can be switched on with `"position_badges": true` in the ledger's `config.json`.)
 
 ## Roadmap
 

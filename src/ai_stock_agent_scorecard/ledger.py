@@ -33,6 +33,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "reveal_delay_days": 5,
     "reveal_on_resolve": True,
     "author": "",
+    "position_badges": False,   # True: show the author's position next to each ticker (from positions_file)
     "positions_file": "positions.json",
     # Refuse to seal a call issued longer ago than this: a call sealed late could
     # already know part of its outcome. 0 disables the check (demo/backfill only).
