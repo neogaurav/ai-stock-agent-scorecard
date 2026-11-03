@@ -172,6 +172,20 @@ def build_site(ledger: Ledger, outcomes: dict[str, Outcome], out_dir: str | Path
         body.append("<div class='card'><h2>Revealed predictions</h2><table><tr><th>Ticker</th><th>Agent</th><th>Entry / stop / target</th><th>Outcome</th></tr>"
                     + "".join(rows) + "</table><p class='sub'>Unrevealed calls appear only as hashes in the chain until their reveal delay passes.</p></div>")
 
+    revealed_commits = {r["commitment"] for r in reveals}
+    pending = [link for link in chain if link["commitment"] not in revealed_commits]
+    if pending:
+        delay = int(cfg["reveal_delay_days"])
+        rows = "".join(f"<tr><td class='num'>{link['seq']}</td><td>{e(link['sealed_at'][:16].replace('T', ' '))} UTC</td>"
+                       f"<td><code>{link['commitment'][:24]}…</code></td></tr>" for link in reversed(pending[-15:]))
+        body.append(f"<div class='card'><h2>Sealed, awaiting reveal ({len(pending)})</h2>"
+                    f"<p class='sub'>These calls are locked in. Only their hashes are public until the {delay}-day reveal delay passes "
+                    "or the call resolves; then the full call appears above and anyone can check it against this hash.</p>"
+                    f"<table><tr><th>#</th><th>Sealed</th><th>Commitment</th></tr>{rows}</table></div>")
+    if not chain:
+        body.append("<div class='card'><h2>Starting soon</h2><p>No predictions sealed yet. The track record begins with the first "
+                    "sealed call; nothing is backfilled.</p></div>")
+
     (out / "index.html").write_text(_page(cfg["title"], "".join(body), cfg), "utf-8")
     (out / "verify.html").write_text(_page(f"Verify · {cfg['title']}", VERIFY_BODY, cfg), "utf-8")
     (out / ".nojekyll").write_text("")

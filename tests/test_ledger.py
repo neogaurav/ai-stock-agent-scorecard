@@ -178,3 +178,13 @@ def test_site_only_shows_revealed(tmp_path):
     assert "revealed one" in html and "secret one" not in html
     assert "Author: LONG 50 sh" in html and "Chain verified" in html
     assert (out / "verify.html").exists() and (out / "data" / "chain.jsonl").read_text().count("\n") == 2
+
+
+def test_empty_ledger_builds_site(tmp_path):
+    led = Ledger(tmp_path / "ledger")
+    led.init()
+    out = build_site(led, {}, tmp_path / "site", positions={})
+    assert "Starting soon" in (out / "index.html").read_text()
+    led.seal([pred()])
+    out = build_site(led, {}, tmp_path / "site", positions={})
+    assert "Sealed, awaiting reveal (1)" in (out / "index.html").read_text()

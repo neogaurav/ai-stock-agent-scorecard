@@ -55,10 +55,11 @@ For free-form reports, `ingest --llm` falls back to LLM extraction (`pip install
 ## Recommended setup (two repos, both free)
 
 1. **`scorecard-data` (private).** Holds `private/` (records and salts) and `public/` (chain and reveals).
-   A scheduled job on your machine runs `ingest --git` and pushes every 15 minutes, so GitHub records the time of
-   each seal. See `examples/windows/`.
+   A scheduled job on your machine seals new calls and pushes every 15 minutes, so GitHub records the time of
+   each seal. On Windows, `examples/windows/setup-pc.ps1` installs everything and registers both jobs.
 2. **`ai-stock-agent-scorecard-site` (public).** Contains only the built site, served by GitHub Pages.
-   `examples/data-repo/.github/workflows/nightly.yml` grades, reveals and deploys it every night.
+   The nightly job (on your PC, or in the cloud via `examples/data-repo/.github/workflows/nightly.yml`)
+   grades, reveals and publishes it.
 
 The data repo must be private, because publishing `private/` would reveal calls early.
 
