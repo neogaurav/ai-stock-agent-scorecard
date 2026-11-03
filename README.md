@@ -1,6 +1,6 @@
 # AI Stock Agent Scorecard
 
-**Live dashboard (demo data for now): https://neogaurav.github.io/ai-stock-agent-scorecard/**
+**Live dashboard: https://neogaurav.github.io/ai-stock-agent-scorecard-site/** · [demo with synthetic data](https://neogaurav.github.io/ai-stock-agent-scorecard/demo/)
 
 **A lookahead-free, verifiable track record for AI stock-research agents.**
 
