@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "thesis-ledger"
+version = "0.1.0"
+description = "Lookahead-free, verifiable track record for AI stock-research agents (commit-reveal hash chain + scorecard)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Gaurav" }]
+keywords = ["llm", "agents", "trading", "evaluation", "backtesting", "mcp", "calibration"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = []
+
+[project.optional-dependencies]
+yfinance = ["yfinance>=0.2.40"]
+llm = ["anthropic>=0.40"]
+mcp = ["mcp>=1.2"]
+all = ["yfinance>=0.2.40", "anthropic>=0.40", "mcp>=1.2"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+thesis-ledger = "thesis_ledger.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/thesis_ledger"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

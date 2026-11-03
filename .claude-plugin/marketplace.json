@@ -1,0 +1,12 @@
+{
+  "name": "thesis-ledger",
+  "description": "Lookahead-free, verifiable track record for AI stock-research agents",
+  "owner": { "name": "Gaurav" },
+  "plugins": [
+    {
+      "name": "thesis-ledger",
+      "source": "./plugins/thesis-ledger",
+      "description": "Seal falsifiable predictions from your research agents and grade them honestly"
+    }
+  ]
+}
