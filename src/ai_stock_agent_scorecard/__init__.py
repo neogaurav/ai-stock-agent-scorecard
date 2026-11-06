@@ -1,5 +1,5 @@
 """AI Stock Agent Scorecard: a lookahead-free, verifiable track record for AI research agents."""
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 from .ledger import Ledger, verify_public  # noqa: E402
 from .schema import Prediction, ValidationError  # noqa: E402
