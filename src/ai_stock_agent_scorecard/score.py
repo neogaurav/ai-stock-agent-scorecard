@@ -74,6 +74,14 @@ def resolve(p: Prediction, bars: list[Bar]) -> Outcome:
             if hit:
                 fill = price
                 out.fill_price, out.fill_date, out.status = fill, b.day.isoformat(), OPEN
+                # Gapped through the entry AND the stop (e.g. a buy-the-dip order filled
+                # far below the stop): the thesis was invalidated on arrival. Count a
+                # full -1R loss instead of letting the stop "exit" sit above the fill.
+                beyond_stop = fill <= p.stop if long else fill >= p.stop
+                if beyond_stop:
+                    out.status, out.exit_price, out.exit_date = STOPPED, round(fill, 4), b.day.isoformat()
+                    out.r = -1.0
+                    return out
                 # trigger bar: stop only
                 stop_hit = b.low <= p.stop if long else b.high >= p.stop
                 if stop_hit:

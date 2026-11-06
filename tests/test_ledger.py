@@ -229,3 +229,10 @@ def test_blanket_disclosure_by_default(tmp_path):
     led.reveal_due(now=datetime(2026, 10, 2, tzinfo=timezone.utc))
     html = (build_site(led, {}, tmp_path / "site") / "index.html").read_text()
     assert "Author:" not in html and "long or short positions in any security" in html
+
+
+def test_gap_through_entry_and_stop_is_minus_one_r():
+    # VRT case: long, buy the dip at 227, stop 208.56; next day opens at 195.
+    p = pred(price_at_issue=235.97, entry=227, stop=208.56, target=271)
+    o = resolve(p, bars((195, 200, 190, 198)))
+    assert o.status == "STOPPED" and o.r == -1.0
