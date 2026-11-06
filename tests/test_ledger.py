@@ -236,3 +236,19 @@ def test_gap_through_entry_and_stop_is_minus_one_r():
     p = pred(price_at_issue=235.97, entry=227, stop=208.56, target=271)
     o = resolve(p, bars((195, 200, 190, 198)))
     assert o.status == "STOPPED" and o.r == -1.0
+
+
+def test_trades_page(tmp_path):
+    led = mk(tmp_path / "ledger", reveal_delay_days=0)
+    hit, waiting = pred(ticker="AMD"), pred(ticker="APP", entry=95, stop=90, target=110)
+    led.seal([hit, waiting], sealed_at="2026-10-01T15:00:00+00:00")
+    led.reveal_due(now=datetime(2026, 10, 2, tzinfo=timezone.utc))
+    provider = StaticProvider({"AMD": bars((100, 121, 99, 120)), "APP": bars((100, 102, 98, 101))})
+    outcomes = grade_all(led.predictions(), provider, today=date(2026, 10, 3))
+    out = build_site(led, outcomes, tmp_path / "site", positions={})
+    trades = json.loads((out / "data" / "trades.json").read_text())
+    by = {t["ticker"]: t for t in trades}
+    assert by["AMD"]["group"] == "resolved" and by["AMD"]["exited_at"] == 120 and by["AMD"]["plan_rr"] == 2.0
+    assert by["APP"]["group"] == "waiting" and by["APP"]["entered_on"] is None
+    html = (out / "trades.html").read_text()
+    assert "Resolved (1)" in html and "Waiting for entry (1)" in html

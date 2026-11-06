@@ -94,7 +94,7 @@ def _page(title: str, body: str, cfg: dict[str, Any]) -> str:
     return (f"<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
             f"<title>{e(title)}</title><style>{CSS}</style></head><body><main>"
             f"<header><div><h1>{e(cfg['title'])}</h1><div class='sub'>Lookahead-free track record of AI research agents</div></div>"
-            f"<nav><a href='index.html'>Scorecard</a><a href='verify.html'>Verify</a><a href='data/chain.jsonl'>Raw data</a></nav></header>"
+            f"<nav><a href='index.html'>Scorecard</a><a href='trades.html'>Trades</a><a href='verify.html'>Verify</a><a href='data/chain.jsonl'>Raw data</a></nav></header>"
             f"{body}<footer>{DISCLAIMER}</footer></main></body></html>")
 
 
@@ -172,7 +172,7 @@ def build_site(ledger: Ledger, outcomes: dict[str, Outcome], out_dir: str | Path
                         f"<td class='num'>{r['entry']:.2f} / {r['stop']:.2f} / {r['target']:.2f}<br><span class='sub'>{e(r['claim'])}</span></td>"
                         f"<td><span class='pill {cls}'>{e(label)}</span></td></tr>")
         body.append("<div class='card'><h2>Revealed predictions</h2><table><tr><th>Ticker</th><th>Agent</th><th>Entry / stop / target</th><th>Outcome</th></tr>"
-                    + "".join(rows) + "</table><p class='sub'>Unrevealed calls appear only as hashes in the chain until their reveal delay passes.</p></div>")
+                    + "".join(rows) + "</table><p class='sub'><a href='trades.html'>See every call with entry and exit details</a>. Unrevealed calls appear only as hashes until their reveal delay passes.</p></div>")
 
     revealed_commits = {r["commitment"] for r in reveals}
     pending = [link for link in chain if link["commitment"] not in revealed_commits]
@@ -189,6 +189,10 @@ def build_site(ledger: Ledger, outcomes: dict[str, Outcome], out_dir: str | Path
                     "sealed call; nothing is backfilled.</p></div>")
 
     (out / "index.html").write_text(_page(cfg["title"], "".join(body), cfg), "utf-8")
+
+    trades = trade_rows(revealed, outcomes)
+    (out / "data" / "trades.json").write_text(json.dumps(trades, indent=2))
+    (out / "trades.html").write_text(_page(f"Trades · {cfg['title']}", trades_body(trades), cfg), "utf-8")
     (out / "verify.html").write_text(_page(f"Verify · {cfg['title']}", VERIFY_BODY, cfg), "utf-8")
     (out / ".nojekyll").write_text("")
     return out
@@ -218,3 +222,80 @@ const chain=await lines('data/chain.jsonl');const l=chain.find(x=>x.commitment==
 o.textContent=l?`Match. ${rec.ticker} ${rec.direction} by ${rec.source_agent} was sealed at ${l.sealed_at} (chain seq ${l.seq}).`:'Hash matches, but this commitment is not in the chain.'}catch(err){o.textContent='Could not read that line: '+err.message}};
 </script>
 """
+
+
+# ---------------------------------------------------------------- trades page
+STATUS_LABEL = {"TARGET_HIT": "Target hit", "STOPPED": "Stopped", "EXPIRED": "Expired", "OPEN": "Open",
+                "PENDING_ENTRY": "Waiting for entry", "NOT_TRIGGERED": "Not triggered"}
+GROUP = {"TARGET_HIT": "resolved", "STOPPED": "resolved", "EXPIRED": "resolved", "OPEN": "open",
+         "PENDING_ENTRY": "waiting", "NOT_TRIGGERED": "waiting"}
+
+
+def trade_rows(preds: list[Prediction], outcomes: dict[str, Outcome]) -> list[dict[str, Any]]:
+    rows = []
+    for p in preds:
+        o = outcomes.get(p.id) or Outcome(id=p.id, status="PENDING_ENTRY" if p.entry is not None else "OPEN")
+        risk = abs(p.entry_ref - p.stop)
+        reward = abs(p.target - p.entry_ref)
+        held = None
+        if o.fill_date and o.exit_date:
+            held = (datetime.fromisoformat(o.exit_date) - datetime.fromisoformat(o.fill_date)).days
+        rows.append({
+            "id": p.id, "called": p.issued_at[:10], "ticker": p.ticker, "agent": p.source_agent,
+            "direction": p.direction, "entry_plan": p.entry, "price_at_call": p.price_at_issue,
+            "stop": p.stop, "target": p.target, "plan_rr": round(reward / risk, 2) if risk else None,
+            "horizon_days": p.horizon_days, "confidence": p.confidence, "claim": p.claim,
+            "status": o.status, "status_label": STATUS_LABEL.get(o.status, o.status), "group": GROUP.get(o.status, "open"),
+            "entered_on": o.fill_date, "entered_at": o.fill_price, "exited_on": o.exit_date, "exited_at": o.exit_price,
+            "r": o.r, "days_held": held,
+        })
+    rows.sort(key=lambda r: (r["exited_on"] or "", r["called"]), reverse=True)
+    return rows
+
+
+def trades_body(trades: list[dict[str, Any]]) -> str:
+    counts = {g: sum(1 for t in trades if t["group"] == g) for g in ("resolved", "open", "waiting")}
+    data = json.dumps(trades).replace("</", "<\\/")
+    return f"""
+<div class='card'>
+<h2>Every revealed call</h2>
+<p class='sub'>Planned levels are what the agent wrote when it made the call. Entered and exited are what the grader saw in
+daily prices: grading starts the trading day after the call, a day that touches both stop and target counts as stopped,
+and a gap through a level fills at the open. R = result ÷ planned risk (entry to stop). Plan R:R = target distance ÷ stop distance.</p>
+<div class='tabs' role='tablist'>
+ <button role='tab' data-g='resolved' aria-selected='true'>Resolved ({counts['resolved']})</button>
+ <button role='tab' data-g='open' aria-selected='false'>Open ({counts['open']})</button>
+ <button role='tab' data-g='waiting' aria-selected='false'>Waiting for entry ({counts['waiting']})</button>
+ <button role='tab' data-g='all' aria-selected='false'>All ({len(trades)})</button>
+</div>
+<div class='tw'><table id='trades'>
+<thead><tr><th>Called</th><th>Ticker</th><th>Agent</th><th>Planned entry</th><th>Stop</th><th>Target</th><th>Plan R:R</th>
+<th>Entered</th><th>Exited</th><th>Outcome</th></tr></thead><tbody></tbody></table></div>
+<p class='sub' id='empty' hidden>No calls in this group yet.</p>
+<p class='sub'>Download the raw rows as <a href='data/trades.json'>trades.json</a>.</p>
+</div>
+<style>
+main{{max-width:1240px}}
+.tabs{{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 10px}}
+.tabs button{{font:inherit;font-size:13.5px;padding:5px 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--muted);cursor:pointer}}
+.tabs button[aria-selected=true]{{background:var(--text);color:var(--bg);border-color:var(--text)}}
+.tw{{overflow-x:auto}} #trades td{{white-space:nowrap}} #trades td.claim{{white-space:normal;min-width:180px}}
+.dir{{font-size:12px;color:var(--muted)}}
+</style>
+<script>
+const T={data};
+const f=(x,d=2)=>x===null||x===undefined?'–':Number(x).toLocaleString(undefined,{{minimumFractionDigits:d,maximumFractionDigits:d}});
+const pill=t=>{{const c={{TARGET_HIT:'good',STOPPED:'bad',EXPIRED:'neutral',OPEN:'info',PENDING_ENTRY:'info',NOT_TRIGGERED:'neutral'}}[t.status]||'neutral';
+ const r=t.r===null?'':' '+(t.r>0?'+':'')+f(t.r)+'R';return `<span class='pill ${{c}}'>${{t.status_label}}${{r}}</span>`}};
+function render(g){{const rows=T.filter(t=>g==='all'||t.group===g);const tb=document.querySelector('#trades tbody');
+ tb.innerHTML=rows.map(t=>`<tr><td>${{t.called}}</td><td><strong>${{t.ticker}}</strong> <span class='dir'>${{t.direction}}</span></td><td>${{t.agent}}</td>
+ <td class='num'>${{t.entry_plan===null?'Market ('+f(t.price_at_call)+')':f(t.entry_plan)}}</td><td class='num'>${{f(t.stop)}}</td><td class='num'>${{f(t.target)}}</td>
+ <td class='num'>${{t.plan_rr===null?'–':f(t.plan_rr)}}</td>
+ <td class='num'>${{t.entered_on?f(t.entered_at)+'<br><span class=sub>'+t.entered_on+'</span>':'–'}}</td>
+ <td class='num'>${{t.exited_on?f(t.exited_at)+'<br><span class=sub>'+t.exited_on+(t.days_held!==null?' · '+t.days_held+'d':'')+'</span>':'–'}}</td>
+ <td>${{pill(t)}}</td></tr>`).join('');
+ document.getElementById('empty').hidden=rows.length>0;
+ document.querySelectorAll('.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.g===g))}}
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>render(b.dataset.g));
+render(new URLSearchParams(location.search).get('show')||'resolved');
+</script>"""
