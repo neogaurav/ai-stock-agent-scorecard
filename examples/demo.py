@@ -83,11 +83,20 @@ led.init(title="AI Stock Agent Scorecard (demo data)", reveal_delay_days=5, max_
 for p in sorted(preds, key=lambda p: p.issued_at):
     led.seal([p], sealed_at=p.issued_at.replace("15:00:00", "15:01:00"))  # demo only: backfilled seal times
 
+# A few calls withdrawn after a "thesis change", to show early closes on the dashboard.
+from datetime import date as _date, timedelta as _td  # noqa: E402
+from ai_stock_agent_scorecard.schema import Close  # noqa: E402
+for p in random.sample(preds, 6):
+    when = (_date.fromisoformat(p.issued_at[:10]) + _td(days=4)).isoformat() + "T21:00:00+00:00"
+    c = Close(ticker=p.ticker, ref=p.id, source_agent="event-reviewer", issued_at=when,
+              reason=random.choice(["Guide cut on the 8-K", "CEO departure", "Customer loss disclosed", "Sector rotation, thesis stale"]))
+    led.seal([c], sealed_at=when)
+
 provider = StaticProvider({t: [Bar(r[0], *r[1:]) for r in rows] for t, rows in paths.items()})
 asof = days[-1]
-outcomes = grade_all(led.predictions(), provider, today=asof)
+outcomes = grade_all(led.predictions(), provider, today=asof, closes=led.close_map())
 led.reveal_due(now=datetime.combine(asof, datetime.min.time(), tzinfo=timezone.utc),
-               resolved_ids={k for k, v in outcomes.items() if v.resolved})
+               resolved_ids={k for k, v in outcomes.items() if v.resolved} | {v.closed_by for v in outcomes.values() if v.closed_by})
 build_site(led, outcomes, SITE, positions={"AAA": {"side": "long", "qty": 100}},
            now=datetime.combine(asof, datetime.min.time(), tzinfo=timezone.utc))
 print(f"{len(led.chain())} sealed, {len(led.reveals())} revealed, verify ok={led.verify().ok}")

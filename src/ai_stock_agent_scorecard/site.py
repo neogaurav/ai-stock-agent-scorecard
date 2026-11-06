@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .ledger import Ledger
-from .schema import Prediction
+from .schema import Prediction, is_close
 from .score import Outcome, scorecard
 
 DISCLAIMER = (
@@ -57,6 +57,7 @@ button{font:inherit;padding:6px 14px;border-radius:8px;border:1px solid var(--li
 STATUS_PILL = {
     "TARGET_HIT": ("good", "Target"), "STOPPED": ("bad", "Stopped"), "EXPIRED": ("neutral", "Expired"),
     "OPEN": ("info", "Open"), "PENDING_ENTRY": ("info", "Waiting for entry"), "NOT_TRIGGERED": ("neutral", "Not triggered"),
+    "CLOSED_EARLY": ("neutral", "Closed early"), "CANCELLED": ("neutral", "Cancelled"), "CLOSING": ("warn", "Closing at next open"),
 }
 VERDICT_PILL = {"calibrated": "good", "close": "good", "overconfident": "bad", "underconfident": "warn", "too few": "neutral"}
 
@@ -110,7 +111,7 @@ def build_site(ledger: Ledger, outcomes: dict[str, Outcome], out_dir: str | Path
         positions = load_positions(ledger.root / cfg["positions_file"]) if badges else {}
 
     chain, reveals = ledger.chain(), ledger.reveals()
-    revealed = [Prediction.from_dict(r["record"]) for r in reveals]
+    revealed = [Prediction.from_dict(r["record"]) for r in reveals if not is_close(r["record"])]
     sc = scorecard(revealed, outcomes)
     verify = ledger.verify()
 
@@ -130,11 +131,27 @@ def build_site(ledger: Ledger, outcomes: dict[str, Outcome], out_dir: str | Path
     body = [f"<div class='card' style='border-color:var(--warn)'><span class='pill warn'>Note</span> {e(notice)}</div>"] if notice else []
     body += [f"<p class='sub'>{status} &nbsp;{len(chain)} sealed · {len(reveals)} revealed · head <code>{head[:16]}</code> · updated {e(as_of)}</p>"]
     body.append("<div class='grid'>"
-                f"<div class='m'><p class='ml'>Predictions sealed</p><p class='mv num'>{len(chain)}</p></div>"
+                f"<div class='m'><p class='ml'>Records sealed</p><p class='mv num'>{len(chain)}</p></div>"
                 f"<div class='m'><p class='ml'>Resolved (revealed)</p><p class='mv num'>{sc['totals']['resolved']}</p></div>"
-                f"<div class='m'><p class='ml'>Hit rate</p><p class='mv num'>{_pct(o['hit_rate'])}</p></div>"
+                f"<div class='m'><p class='ml'>Win rate</p><p class='mv num'>{_pct(o['win_rate'])}</p></div>"
                 f"<div class='m'><p class='ml'>Avg R per call</p><p class='mv num'>{_r(o['avg_r'])}</p></div>"
                 "</div>")
+
+    t = sc["totals"]
+    if t["resolved"] or o["cancelled"]:
+        def cell(label, n, extra=""):
+            return f"<div class='m'><p class='ml'>{label}</p><p class='mv num'>{n}</p>{extra}</div>"
+        early = (f"<p class='sub'>{o['early_wins']} up · {o['early_losses']} down"
+                 + (f" · {_r(o['early_avg_r'])} avg" if o["early_avg_r"] is not None else "") + "</p>")
+        body.append("<div class='card'><h2>How calls ended</h2><div class='grid'>"
+                    + cell("Target hit", t.get("TARGET_HIT", 0)) + cell("Stopped", t.get("STOPPED", 0))
+                    + cell("Expired", t.get("EXPIRED", 0)) + cell("Closed early", o["early_closes"], early)
+                    + "</div><p class='sub'>Win rate counts every call that was entered and finished: a target hit, or any other exit "
+                    "above the entry (below it for shorts). Closed early means the agent withdrew the call after a thesis change; "
+                    "it exits at the next day's open, never at a price the agent picks, and counts as a win or loss like any other trade. "
+                    f"Target-hit rate, leaving early closes out: {_pct(o['hit_rate'])}."
+                    + (f" {o['cancelled']} call(s) were withdrawn before entry and take no R." if o["cancelled"] else "")
+                    + "</p></div>")
 
     if sc["agents"]:
         max_abs = max((abs(a["avg_r"]) for a in sc["agents"] if a["avg_r"] is not None), default=1) or 1
@@ -144,8 +161,9 @@ def build_site(ledger: Ledger, outcomes: dict[str, Outcome], out_dir: str | Path
             width = 0 if ar is None else min(100, abs(ar) / max_abs * 100)
             color = "var(--good)" if (ar or 0) >= 0 else "var(--bad)"
             rows.append(f"<tr><td>{e(a['agent'])}</td><td style='width:40%'><div class='bar'><i style='width:{width:.0f}%;background:{color}'></i></div></td>"
-                        f"<td class='num'>{_r(ar)}</td><td class='num'>{_pct(a['hit_rate'])}</td><td class='num'>{a['resolved']}</td></tr>")
-        body.append("<div class='card'><h2>Which agent earns its keep</h2><table><tr><th>Agent</th><th></th><th>Avg R</th><th>Hit rate</th><th>Resolved</th></tr>"
+                        f"<td class='num'>{_r(ar)}</td><td class='num'>{_pct(a['win_rate'])}</td><td class='num'>{a['resolved']}</td>"
+                        f"<td class='num'>{a['early_closes'] or '–'}</td></tr>")
+        body.append("<div class='card'><h2>Which agent earns its keep</h2><table><tr><th>Agent</th><th></th><th>Avg R</th><th>Win rate</th><th>Resolved</th><th>Closed early</th></tr>"
                     + "".join(rows) + "</table></div>")
 
     if sc["insights"]:
@@ -164,7 +182,7 @@ def build_site(ledger: Ledger, outcomes: dict[str, Outcome], out_dir: str | Path
         rows = []
         for r in sc["recent"]:
             cls, label = STATUS_PILL.get(r["status"], ("neutral", r["status"]))
-            if r.get("r") is not None and r["status"] in ("TARGET_HIT", "STOPPED", "EXPIRED"):
+            if r.get("r") is not None and r["status"] in ("TARGET_HIT", "STOPPED", "EXPIRED", "CLOSED_EARLY"):
                 label = f"{label} {r['r']:+.1f}R"
             badge = f"<br>{position_badge(r['ticker'], positions, as_of)}" if badges else ""
             rows.append(f"<tr><td><strong>{e(r['ticker'])}</strong> <span class='sub'>{e(r['direction'])}</span>{badge}</td>"
@@ -226,9 +244,10 @@ o.textContent=l?`Match. ${rec.ticker} ${rec.direction} by ${rec.source_agent} wa
 
 # ---------------------------------------------------------------- trades page
 STATUS_LABEL = {"TARGET_HIT": "Target hit", "STOPPED": "Stopped", "EXPIRED": "Expired", "OPEN": "Open",
-                "PENDING_ENTRY": "Waiting for entry", "NOT_TRIGGERED": "Not triggered"}
-GROUP = {"TARGET_HIT": "resolved", "STOPPED": "resolved", "EXPIRED": "resolved", "OPEN": "open",
-         "PENDING_ENTRY": "waiting", "NOT_TRIGGERED": "waiting"}
+                "PENDING_ENTRY": "Waiting for entry", "NOT_TRIGGERED": "Not triggered", "CLOSED_EARLY": "Closed early",
+                "CANCELLED": "Cancelled before entry", "CLOSING": "Closing at next open"}
+GROUP = {"TARGET_HIT": "resolved", "STOPPED": "resolved", "EXPIRED": "resolved", "CLOSED_EARLY": "resolved", "OPEN": "open",
+         "CLOSING": "open", "PENDING_ENTRY": "waiting", "NOT_TRIGGERED": "waiting", "CANCELLED": "cancelled"}
 
 
 def trade_rows(preds: list[Prediction], outcomes: dict[str, Outcome]) -> list[dict[str, Any]]:
@@ -247,7 +266,8 @@ def trade_rows(preds: list[Prediction], outcomes: dict[str, Outcome]) -> list[di
             "horizon_days": p.horizon_days, "confidence": p.confidence, "claim": p.claim,
             "status": o.status, "status_label": STATUS_LABEL.get(o.status, o.status), "group": GROUP.get(o.status, "open"),
             "entered_on": o.fill_date, "entered_at": o.fill_price, "exited_on": o.exit_date, "exited_at": o.exit_price,
-            "r": o.r, "days_held": held,
+            "r": o.r, "days_held": held, "early": bool(o.closed_by), "close_reason": o.close_reason,
+            "closed_on": o.closed_on,
         })
     rows.sort(key=lambda r: (r["exited_on"] or "", r["called"]), reverse=True)
     return rows
@@ -255,17 +275,20 @@ def trade_rows(preds: list[Prediction], outcomes: dict[str, Outcome]) -> list[di
 
 def trades_body(trades: list[dict[str, Any]]) -> str:
     counts = {g: sum(1 for t in trades if t["group"] == g) for g in ("resolved", "open", "waiting")}
+    counts["early"] = sum(1 for t in trades if t["early"])
     data = json.dumps(trades).replace("</", "<\\/")
     return f"""
 <div class='card'>
 <h2>Every revealed call</h2>
 <p class='sub'>Planned levels are what the agent wrote when it made the call. Entered and exited are what the grader saw in
 daily prices: grading starts the trading day after the call, a day that touches both stop and target counts as stopped,
-and a gap through a level fills at the open. R = result ÷ planned risk (entry to stop). Plan R:R = target distance ÷ stop distance.</p>
+and a gap through a level fills at the open. A call the agent withdrew after a thesis change exits at the next day's open
+(or is cancelled if it was never entered). R = result ÷ planned risk (entry to stop). Plan R:R = target distance ÷ stop distance.</p>
 <div class='tabs' role='tablist'>
  <button role='tab' data-g='resolved' aria-selected='true'>Resolved ({counts['resolved']})</button>
  <button role='tab' data-g='open' aria-selected='false'>Open ({counts['open']})</button>
  <button role='tab' data-g='waiting' aria-selected='false'>Waiting for entry ({counts['waiting']})</button>
+ <button role='tab' data-g='early' aria-selected='false'>Closed early ({counts['early']})</button>
  <button role='tab' data-g='all' aria-selected='false'>All ({len(trades)})</button>
 </div>
 <div class='tw'><table id='trades'>
@@ -279,21 +302,23 @@ main{{max-width:1240px}}
 .tabs{{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 10px}}
 .tabs button{{font:inherit;font-size:13.5px;padding:5px 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--muted);cursor:pointer}}
 .tabs button[aria-selected=true]{{background:var(--text);color:var(--bg);border-color:var(--text)}}
-.tw{{overflow-x:auto}} #trades td{{white-space:nowrap}} #trades td.claim{{white-space:normal;min-width:180px}}
+.tw{{overflow-x:auto}} #trades td{{white-space:nowrap}} #trades td:last-child{{white-space:normal;min-width:170px}}
 .dir{{font-size:12px;color:var(--muted)}}
 </style>
 <script>
 const T={data};
 const f=(x,d=2)=>x===null||x===undefined?'–':Number(x).toLocaleString(undefined,{{minimumFractionDigits:d,maximumFractionDigits:d}});
-const pill=t=>{{const c={{TARGET_HIT:'good',STOPPED:'bad',EXPIRED:'neutral',OPEN:'info',PENDING_ENTRY:'info',NOT_TRIGGERED:'neutral'}}[t.status]||'neutral';
+const pill=t=>{{const c={{TARGET_HIT:'good',STOPPED:'bad',EXPIRED:'neutral',OPEN:'info',PENDING_ENTRY:'info',NOT_TRIGGERED:'neutral',CANCELLED:'neutral',CLOSING:'warn',
+ CLOSED_EARLY:t.r>0?'good':'bad'}}[t.status]||'neutral';
  const r=t.r===null?'':' '+(t.r>0?'+':'')+f(t.r)+'R';return `<span class='pill ${{c}}'>${{t.status_label}}${{r}}</span>`}};
-function render(g){{const rows=T.filter(t=>g==='all'||t.group===g);const tb=document.querySelector('#trades tbody');
+const esc=x=>String(x).replace(/[&<>"']/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}})[c]);
+function render(g){{const rows=T.filter(t=>g==='all'||(g==='early'?t.early:t.group===g));const tb=document.querySelector('#trades tbody');
  tb.innerHTML=rows.map(t=>`<tr><td>${{t.called}}</td><td><strong>${{t.ticker}}</strong> <span class='dir'>${{t.direction}}</span></td><td>${{t.agent}}</td>
  <td class='num'>${{t.entry_plan===null?'Market ('+f(t.price_at_call)+')':f(t.entry_plan)}}</td><td class='num'>${{f(t.stop)}}</td><td class='num'>${{f(t.target)}}</td>
  <td class='num'>${{t.plan_rr===null?'–':f(t.plan_rr)}}</td>
  <td class='num'>${{t.entered_on?f(t.entered_at)+'<br><span class=sub>'+t.entered_on+'</span>':'–'}}</td>
  <td class='num'>${{t.exited_on?f(t.exited_at)+'<br><span class=sub>'+t.exited_on+(t.days_held!==null?' · '+t.days_held+'d':'')+'</span>':'–'}}</td>
- <td>${{pill(t)}}</td></tr>`).join('');
+ <td>${{pill(t)}}${{t.early?'<br><span class=sub>Withdrawn '+t.closed_on+(t.close_reason?': '+esc(t.close_reason):'')+'</span>':''}}</td></tr>`).join('');
  document.getElementById('empty').hidden=rows.length>0;
  document.querySelectorAll('.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.g===g))}}
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>render(b.dataset.g));

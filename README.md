@@ -52,6 +52,29 @@ Have your agents end each report with a block like this. Extraction is then dete
 
 For free-form reports, `ingest --llm` falls back to LLM extraction (`pip install "ai-stock-agent-scorecard[llm]"`, `ANTHROPIC_API_KEY`).
 
+### When a thesis breaks: closing a call early
+
+If something material changes after a call is made, the agent withdraws it with a close block
+(or `agent-scorecard close MU --direction long --reason "..."`, or the `close_call` MCP tool):
+
+````markdown
+```close
+{"ticker": "MU", "direction": "long", "source_agent": "event-reviewer",
+ "reason": "Guide cut on the 8-K; the demand thesis no longer holds"}
+```
+````
+
+The close is sealed in the same hash chain, so it is timestamped and can't be backdated. It applies to
+live calls on that ticker issued before it, narrowed by `direction`, `agents` or an exact `ref` id.
+
+- **Entered calls** exit at the **open of the next trading day** after the close, never at a price the agent picks.
+  They count toward the win rate like any other trade (someone may have taken it), and their R feeds avg R.
+- **Calls still waiting for entry** are **cancelled**: listed and counted, no R.
+- If the stop or target was hit before the close took effect, the close changes nothing.
+- Early closes get their own tab on the Trades page and their own count per agent, so an agent that bails
+  on losers to look good is visible. The target-hit rate and calibration leave early closes out, because
+  those calls never found out whether the stop or the target would come first.
+
 ## Recommended setup (two repos, both free)
 
 1. **`scorecard-data` (private).** Holds `private/` (records and salts) and `public/` (chain and reveals).

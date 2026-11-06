@@ -4,7 +4,10 @@ Grading is deliberately conservative:
 * grading starts on the first trading day *after* the call was issued;
 * if one bar touches both stop and target, the stop is assumed to hit first;
 * gaps through a level fill at the open (so a gap through the stop is worse than -1R);
-* on the bar where a limit entry triggers, only the stop is checked.
+* on the bar where a limit entry triggers, only the stop is checked;
+* a call withdrawn by a sealed ``close`` exits at the open of the first trading day
+  after the close (never at a price the agent picks); if it was never entered it is
+  cancelled and takes no R.
 """
 from __future__ import annotations
 
@@ -15,7 +18,7 @@ from statistics import mean
 from typing import Any, Iterable
 
 from .prices import Bar, PriceProvider
-from .schema import Prediction, parse_iso
+from .schema import Close, Prediction, parse_iso
 
 TARGET_HIT = "TARGET_HIT"
 STOPPED = "STOPPED"
@@ -23,7 +26,10 @@ EXPIRED = "EXPIRED"
 NOT_TRIGGERED = "NOT_TRIGGERED"
 OPEN = "OPEN"
 PENDING_ENTRY = "PENDING_ENTRY"
-RESOLVED = (TARGET_HIT, STOPPED, EXPIRED)
+CLOSED_EARLY = "CLOSED_EARLY"   # entered, then withdrawn by the agent: exits at the next open
+CANCELLED = "CANCELLED"         # withdrawn before the entry ever filled: no R
+CLOSING = "CLOSING"             # withdrawn, waiting for the next trading day's open
+RESOLVED = (TARGET_HIT, STOPPED, EXPIRED, CLOSED_EARLY)
 
 
 @dataclass
@@ -36,6 +42,9 @@ class Outcome:
     exit_price: float | None = None
     exit_date: str | None = None
     bars_used: int = 0
+    closed_by: str | None = None
+    close_reason: str | None = None
+    closed_on: str | None = None
 
     @property
     def resolved(self) -> bool:
@@ -51,9 +60,29 @@ def _r(p: Prediction, fill: float, exit_: float) -> float:
     return round(move / risk, 3)
 
 
-def resolve(p: Prediction, bars: list[Bar]) -> Outcome:
+def resolve(p: Prediction, bars: list[Bar], close: Close | None = None) -> Outcome:
     issued = parse_iso(p.issued_at).date()
     window = [b for b in sorted(bars, key=lambda b: b.day) if b.day > issued][: p.horizon_days]
+    if close is None:
+        return _walk(p, window)
+    close_day = parse_iso(close.issued_at).date()
+    k = next((i for i, b in enumerate(window) if b.day > close_day), None)
+    out = _walk(p, window if k is None else window[:k])
+    if out.status not in (OPEN, PENDING_ENTRY):
+        return out  # stop, target or horizon came first; the close changes nothing
+    out.closed_by, out.close_reason, out.closed_on = close.id, close.reason, close.issued_at[:10]
+    out.bars_used = len(window)
+    if k is None:
+        out.status = CLOSING
+        return out
+    b = window[k]
+    if out.status == PENDING_ENTRY:
+        out.status = CANCELLED
+        return out
+    return _exit(out, p, out.fill_price, CLOSED_EARLY, b.open, b)
+
+
+def _walk(p: Prediction, window: list[Bar]) -> Outcome:
     long = p.direction == "long"
     out = Outcome(id=p.id, status=PENDING_ENTRY if p.entry is not None else OPEN, bars_used=len(window))
 
@@ -127,13 +156,15 @@ def _exit(out: Outcome, p: Prediction, fill: float, status: str, price: float, b
     return out
 
 
-def grade_all(preds: Iterable[Prediction], provider: PriceProvider, today: date | None = None) -> dict[str, Outcome]:
+def grade_all(preds: Iterable[Prediction], provider: PriceProvider, today: date | None = None,
+              closes: dict[str, Close] | None = None) -> dict[str, Outcome]:
     today = today or date.today()
+    closes = closes or {}
     results: dict[str, Outcome] = {}
     for p in preds:
         start = parse_iso(p.issued_at).date()
         end = min(today, start + timedelta(days=int(p.horizon_days * 1.6) + 10))
-        results[p.id] = resolve(p, provider.daily_bars(p.ticker, start, end))
+        results[p.id] = resolve(p, provider.daily_bars(p.ticker, start, end), closes.get(p.id))
     return results
 
 
@@ -149,29 +180,48 @@ def _bucket_label(lo: float, hi: float) -> str:
     return f"{int(lo * 100)}–{int(hi * 100)}%"
 
 
+def _is_win(o: Outcome) -> bool:
+    return o.status == TARGET_HIT or (o.r is not None and o.r > 0)
+
+
 def _stats(rows: list[tuple[Prediction, Outcome]]) -> dict[str, Any]:
+    """Win rate counts every entered call that finished, early closes included (a reader may
+    have taken the trade). Target-hit rate leaves early closes out, since they never got to
+    find out whether stop or target came first."""
     res = [(p, o) for p, o in rows if o.resolved]
     rs = [o.r for _, o in res if o.r is not None]
-    hits = sum(1 for _, o in res if o.status == TARGET_HIT)
+    wins = sum(1 for _, o in res if _is_win(o))
+    played_out = [o for _, o in res if o.status != CLOSED_EARLY]
+    hits = sum(1 for o in played_out if o.status == TARGET_HIT)
+    early = [o for _, o in res if o.status == CLOSED_EARLY]
+    early_r = [o.r for o in early if o.r is not None]
     return {
         "n": len(rows),
         "resolved": len(res),
-        "hit_rate": round(hits / len(res), 3) if res else None,
+        "win_rate": round(wins / len(res), 3) if res else None,
+        "hit_rate": round(hits / len(played_out), 3) if played_out else None,
         "avg_r": round(mean(rs), 3) if rs else None,
         "total_r": round(sum(rs), 2) if rs else 0.0,
+        "early_closes": len(early),
+        "early_wins": sum(1 for o in early if _is_win(o)),
+        "early_losses": sum(1 for o in early if not _is_win(o)),
+        "early_avg_r": round(mean(early_r), 3) if early_r else None,
+        "cancelled": sum(1 for _, o in rows if o.status == CANCELLED),
     }
 
 
 def scorecard(preds: list[Prediction], outcomes: dict[str, Outcome], *, min_n: int = 8) -> dict[str, Any]:
     rows = [(p, outcomes[p.id]) for p in preds if p.id in outcomes]
     resolved = [(p, o) for p, o in rows if o.resolved]
+    # Confidence is "odds the target comes before the stop"; an early close never found out.
+    played_out = [(p, o) for p, o in resolved if o.status != CLOSED_EARLY]
     counts: dict[str, int] = defaultdict(int)
     for _, o in rows:
         counts[o.status] += 1
 
     overall = _stats(rows)
-    brier = (round(mean((p.confidence - (1.0 if o.status == TARGET_HIT else 0.0)) ** 2 for p, o in resolved), 4)
-             if resolved else None)
+    brier = (round(mean((p.confidence - (1.0 if o.status == TARGET_HIT else 0.0)) ** 2 for p, o in played_out), 4)
+             if played_out else None)
 
     by_agent: dict[str, list] = defaultdict(list)
     for p, o in rows:
@@ -181,7 +231,7 @@ def scorecard(preds: list[Prediction], outcomes: dict[str, Outcome], *, min_n: i
 
     calibration = []
     for lo, hi in BUCKETS:
-        b = [(p, o) for p, o in resolved if lo <= p.confidence < hi]
+        b = [(p, o) for p, o in played_out if lo <= p.confidence < hi]
         if not b:
             continue
         stated = mean(p.confidence for p, _ in b)
@@ -236,6 +286,10 @@ def _insights(agents, calibration, by_agent, min_n) -> list[str]:
         if s["resolved"] >= min_n and l["resolved"] >= min_n and s["avg_r"] is not None and l["avg_r"] is not None:
             if s["avg_r"] < 0 < l["avg_r"]:
                 out.append(f"{agent} loses on horizons under 30 days ({s['avg_r']:+.2f}R) but wins at 30+ ({l['avg_r']:+.2f}R).")
+    for a in agents:
+        if a.get("early_closes", 0) >= 3 and a.get("early_avg_r") is not None:
+            out.append(f"{a['agent']} closed {a['early_closes']} calls early ({a['early_wins']} up, {a['early_losses']} down, "
+                       f"{a['early_avg_r']:+.2f}R on average).")
     human = next((a for a in agents if a["agent"] == "human"), None)
     if human and human["avg_r"] is not None and ranked:
         ai = [a for a in ranked if a["agent"] != "human"]

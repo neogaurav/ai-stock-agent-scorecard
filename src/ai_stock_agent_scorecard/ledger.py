@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from .schema import Prediction, canonical_json, parse_iso, utc_now_iso
+from .schema import Close, Prediction, canonical_json, is_close, parse_iso, utc_now_iso
 
 GENESIS = "0" * 64
 
@@ -116,13 +116,19 @@ class Ledger:
         return _read_jsonl(self.reveals_path)
 
     def predictions(self) -> list[Prediction]:
-        return [Prediction.from_dict(r["record"]) for r in self.records()]
+        return [Prediction.from_dict(r["record"]) for r in self.records() if not is_close(r["record"])]
+
+    def closes(self) -> list[Close]:
+        return [Close.from_dict(r["record"]) for r in self.records() if is_close(r["record"])]
+
+    def close_map(self) -> dict[str, Close]:
+        return close_map([r["record"] for r in self.records()])
 
     def revealed_ids(self) -> set[str]:
         return {r["record"]["id"] for r in self.reveals()}
 
     # -- writes ------------------------------------------------------------
-    def seal(self, predictions: Iterable[Prediction], *, sealed_at: str | None = None,
+    def seal(self, predictions: Iterable[Prediction | Close], *, sealed_at: str | None = None,
              git_commit: bool = False) -> list[dict[str, Any]]:
         """Seal predictions: write private record + salt, append public chain link."""
         preds = list(predictions)
@@ -191,6 +197,21 @@ class Ledger:
             return
         subprocess.run(["git", "-C", str(self.root), "add", "public", "config.json"], check=True)
         subprocess.run(["git", "-C", str(self.root), "commit", "-q", "-m", message], check=False)
+
+
+def close_map(records: Iterable[dict[str, Any]]) -> dict[str, Close]:
+    """Map each prediction id to the first later close that withdraws it (records in chain order)."""
+    seen: list[Prediction] = []
+    out: dict[str, Close] = {}
+    for rec in records:
+        if is_close(rec):
+            c = Close.from_dict(rec)
+            for p in seen:
+                if p.id not in out and c.matches(p):
+                    out[p.id] = c
+        else:
+            seen.append(Prediction.from_dict(rec))
+    return out
 
 
 def verify_public(chain: list[dict[str, Any]], reveals: list[dict[str, Any]]) -> VerifyReport:

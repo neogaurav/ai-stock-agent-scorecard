@@ -12,7 +12,7 @@ from . import __version__
 from .extract import extract_blocks, ingest_folder
 from .ledger import Ledger
 from .prices import CSVProvider, YFinanceProvider
-from .schema import Prediction
+from .schema import Close, record_from_dict
 from .score import Outcome, grade_all, scorecard
 from .site import build_site
 
@@ -47,16 +47,26 @@ def cmd_seal(args):
     raw = raw.strip()
     if raw.startswith("{") or raw.startswith("["):
         data = json.loads(raw)
-        preds = [Prediction.from_dict(d) for d in (data if isinstance(data, list) else [data])]
+        preds = [record_from_dict(d) for d in (data if isinstance(data, list) else [data])]
         errors = []
     else:
         preds, errors = extract_blocks(raw)
     links = led.seal(preds, git_commit=args.git)
     for err in errors:
         print(f"skipped: {err}", file=sys.stderr)
-    print(f"Sealed {len(links)} prediction(s)" + (f" · head {links[-1]['hash'][:12]}" if links else ""))
+    print(f"Sealed {len(links)} record(s)" + (f" · head {links[-1]['hash'][:12]}" if links else ""))
     rep = led.verify()
     print("Chain verified" if rep.ok else f"Chain problems: {rep.errors}")
+
+
+def cmd_close(args):
+    led = _ledger(args)
+    c = Close(ticker=args.ticker, reason=args.reason, direction=args.direction, ref=args.ref,
+              agents=args.agent or [], source_agent=args.by)
+    targets = [p for p in led.predictions() if c.matches(p) and p.id not in led.close_map()]
+    links = led.seal([c], git_commit=args.git)
+    print(f"Sealed close {c.id}: withdraws {len(targets)} live call(s)"
+          + (f" ({', '.join(p.id for p in targets)})" if targets else "") if links else "Already sealed")
 
 
 def cmd_ingest(args):
@@ -71,7 +81,8 @@ def cmd_ingest(args):
 def cmd_score(args):
     led = _ledger(args)
     preds = led.predictions()
-    outcomes = grade_all(preds, _provider(args), today=date.fromisoformat(args.today) if args.today else None)
+    outcomes = grade_all(preds, _provider(args), today=date.fromisoformat(args.today) if args.today else None,
+                         closes=led.close_map())
     outcomes_path(led).write_text(json.dumps({k: v.to_dict() for k, v in outcomes.items()}, indent=2))
     sc = scorecard(preds, outcomes)
     if args.json:
@@ -79,16 +90,20 @@ def cmd_score(args):
         return
     o = sc["overall"]
     print(f"{sc['totals']['predictions']} predictions · {sc['totals']['resolved']} resolved · "
-          f"hit rate {o['hit_rate'] if o['hit_rate'] is not None else '–'} · avg R {o['avg_r'] if o['avg_r'] is not None else '–'}")
+          f"win rate {o['win_rate'] if o['win_rate'] is not None else '–'} · avg R {o['avg_r'] if o['avg_r'] is not None else '–'}"
+          + (f" · {o['early_closes']} closed early" if o["early_closes"] else "")
+          + (f" · {o['cancelled']} cancelled" if o["cancelled"] else ""))
     for a in sc["agents"]:
-        print(f"  {a['agent']:<14} n={a['resolved']:<4} hit={a['hit_rate']} avgR={a['avg_r']}")
+        print(f"  {a['agent']:<18} n={a['resolved']:<4} win={a['win_rate']} avgR={a['avg_r']} early={a['early_closes']}")
     for line in sc["insights"]:
         print(f"  • {line}")
 
 
 def cmd_reveal(args):
     led = _ledger(args)
-    resolved = {k for k, v in load_outcomes(led).items() if v.resolved}
+    outs = load_outcomes(led).values()
+    resolved = {o.id for o in outs if o.resolved}
+    resolved |= {o.closed_by for o in outs if o.closed_by and o.resolved or o.closed_by and o.status == "CANCELLED"}
     out = led.reveal_due(resolved_ids=resolved, git_commit=args.git)
     print(f"Revealed {len(out)} prediction(s)")
 
@@ -138,6 +153,16 @@ def main(argv=None):
     p.add_argument("file", nargs="?", default="-")
     p.add_argument("--git", action="store_true", help="git commit public files after sealing")
     p.set_defaults(fn=cmd_seal)
+
+    p = sub.add_parser("close", help="withdraw earlier calls on a ticker because the thesis changed")
+    p.add_argument("ticker")
+    p.add_argument("--reason", default="", help="why the thesis no longer holds")
+    p.add_argument("--direction", choices=("long", "short"), help="only close calls in this direction")
+    p.add_argument("--agent", action="append", help="only close calls from this agent (repeatable)")
+    p.add_argument("--ref", help="close exactly this call id")
+    p.add_argument("--by", default="human", help="who is closing (recorded as source_agent)")
+    p.add_argument("--git", action="store_true")
+    p.set_defaults(fn=cmd_close)
 
     p = sub.add_parser("ingest", help="seal predictions from every new report in a folder")
     p.add_argument("folder")

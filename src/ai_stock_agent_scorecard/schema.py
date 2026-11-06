@@ -116,3 +116,69 @@ class Prediction:
         if unknown:
             raise ValidationError(f"unknown fields: {sorted(unknown)}")
         return cls(**data)
+
+
+@dataclass
+class Close:
+    """An agent withdrawing earlier calls because the thesis changed.
+
+    Sealed in the same chain as predictions, so it is timestamped and cannot be
+    backdated. It applies to live calls on ``ticker`` issued *before* it, narrowed by
+    ``direction``, ``agents`` or an exact ``ref`` id when given. An entered call exits
+    at the next trading day's open; a call still waiting for entry is cancelled.
+    """
+
+    ticker: str
+    issued_at: str = field(default_factory=utc_now_iso)
+    source_agent: str = "pm"
+    reason: str = ""
+    direction: str | None = None
+    agents: list[str] = field(default_factory=list)
+    ref: str | None = None
+    thesis_run: str | None = None
+    kind: str = "close"
+    id: str = ""
+
+    def __post_init__(self) -> None:
+        self.ticker = self.ticker.strip().upper()
+        if not self.ticker:
+            raise ValidationError("ticker is required")
+        self.source_agent = (self.source_agent or "pm").strip().lower()
+        self.issued_at = parse_iso(self.issued_at).isoformat()
+        if self.direction is not None:
+            self.direction = self.direction.strip().lower()
+            if self.direction not in DIRECTIONS:
+                raise ValidationError(f"direction must be one of {DIRECTIONS}")
+        self.agents = [a.strip().lower() for a in self.agents]
+        self.kind = "close"
+        if not self.id:
+            digest = hashlib.sha256(canonical_json({k: v for k, v in asdict(self).items() if k != "id"}).encode()).hexdigest()[:6]
+            self.id = f"close-{self.ticker}-{self.issued_at[:10]}-{digest}"
+
+    def matches(self, p: "Prediction") -> bool:
+        if parse_iso(p.issued_at) >= parse_iso(self.issued_at):
+            return False  # never closes a call made at the same time or later
+        if self.ref:
+            return p.id == self.ref
+        return (p.ticker == self.ticker and (self.direction is None or p.direction == self.direction)
+                and (not self.agents or p.source_agent in self.agents))
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Close":
+        known = {f.name for f in fields(cls)}
+        data = {k: v for k, v in data.items() if k != "action"}
+        unknown = set(data) - known
+        if unknown:
+            raise ValidationError(f"unknown fields in close: {sorted(unknown)}")
+        return cls(**data)
+
+
+def is_close(data: dict[str, Any]) -> bool:
+    return data.get("kind") == "close" or data.get("action") == "close"
+
+
+def record_from_dict(data: dict[str, Any]) -> "Prediction | Close":
+    return Close.from_dict(data) if is_close(data) else Prediction.from_dict(data)

@@ -15,6 +15,15 @@ Two paths:
 2. **LLM extraction (fallback).** For free-form reports, an LLM pulls out
    checkable calls into the same schema. Needs ``pip install ai-stock-agent-scorecard[llm]``
    and ``ANTHROPIC_API_KEY``.
+
+To withdraw earlier calls when a thesis breaks, write a close block::
+
+    ```close
+    {"ticker": "MU", "direction": "long", "source_agent": "event-reviewer",
+     "reason": "Guide cut; demand thesis no longer holds"}
+    ```
+
+(``{"action": "close", ...}`` inside a ``prediction`` or ``scorecard`` block works too.)
 """
 from __future__ import annotations
 
@@ -27,15 +36,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .schema import Prediction, ValidationError
+from .schema import Close, Prediction, ValidationError, is_close
 
-BLOCK_RE = re.compile(r"```(?:prediction|scorecard)\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
+BLOCK_RE = re.compile(r"```(prediction|scorecard|close)\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
 FIELD_NAMES = {f.name for f in fields(Prediction)}
+CLOSE_FIELDS = {f.name for f in fields(Close)} | {"action"}
 
 
-def extract_blocks(text: str, defaults: dict[str, Any] | None = None) -> tuple[list[Prediction], list[str]]:
+def extract_blocks(text: str, defaults: dict[str, Any] | None = None) -> tuple[list[Prediction | Close], list[str]]:
     preds, errors = [], []
-    for raw in BLOCK_RE.findall(text):
+    for fence, raw in BLOCK_RE.findall(text):
         try:
             data = json.loads(raw)
         except json.JSONDecodeError as exc:
@@ -43,6 +53,9 @@ def extract_blocks(text: str, defaults: dict[str, Any] | None = None) -> tuple[l
             continue
         for item in data if isinstance(data, list) else [data]:
             try:
+                if fence.lower() == "close" or is_close(item):
+                    preds.append(_build_close(item, defaults))
+                    continue
                 preds.append(_build(item, defaults))
             except (ValidationError, TypeError, ValueError) as exc:
                 errors.append(f"{item.get('ticker', '?')}: {exc}")
@@ -52,6 +65,13 @@ def extract_blocks(text: str, defaults: dict[str, Any] | None = None) -> tuple[l
 def _build(item: dict[str, Any], defaults: dict[str, Any] | None) -> Prediction:
     merged = {**(defaults or {}), **{k: v for k, v in item.items() if v is not None}}
     return Prediction.from_dict({k: v for k, v in merged.items() if k in FIELD_NAMES})
+
+
+def _build_close(item: dict[str, Any], defaults: dict[str, Any] | None) -> Close:
+    merged = {**(defaults or {}), **{k: v for k, v in item.items() if v is not None}}
+    if isinstance(merged.get("agents"), str):
+        merged["agents"] = [merged["agents"]]
+    return Close.from_dict({k: v for k, v in merged.items() if k in CLOSE_FIELDS})
 
 
 LLM_PROMPT = """You extract falsifiable trading predictions from an analyst report.
@@ -93,7 +113,8 @@ def extract_llm(text: str, defaults: dict[str, Any] | None = None,
 def _stable_id(p: Prediction, rel: str, index: int) -> str:
     """Same file + same block -> same id, so a rewritten report is never sealed twice."""
     h = hashlib.sha256(f"{rel}|{p.source_agent}|{index}".encode()).hexdigest()[:8]
-    return f"{p.ticker}-{p.source_agent}-{h}"
+    prefix = "close-" if isinstance(p, Close) else ""
+    return f"{prefix}{p.ticker}-{p.source_agent}-{h}"
 
 
 def ingest_folder(folder: str | Path, ledger, *, use_llm: bool = False, patterns=("*.md", "*.txt"),
@@ -111,7 +132,7 @@ def ingest_folder(folder: str | Path, ledger, *, use_llm: bool = False, patterns
     lag = int(ledger.config.get("max_seal_lag_minutes") or 0)
     seen: dict[str, str] = json.loads(ledger.ingested_path.read_text()) if ledger.ingested_path.exists() else {}
     summary = {"files": 0, "sealed": 0, "too_old": 0, "errors": []}
-    batch: list[Prediction] = []
+    batch: list[Prediction | Close] = []
     for pattern in patterns:
         for path in sorted(folder.rglob(pattern)):
             text = path.read_text("utf-8", errors="replace")

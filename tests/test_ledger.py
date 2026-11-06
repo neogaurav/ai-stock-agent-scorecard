@@ -252,3 +252,86 @@ def test_trades_page(tmp_path):
     assert by["APP"]["group"] == "waiting" and by["APP"]["entered_on"] is None
     html = (out / "trades.html").read_text()
     assert "Resolved (1)" in html and "Waiting for entry (1)" in html
+
+
+# ---------------------------------------------------------------- early close
+from ai_stock_agent_scorecard import Close  # noqa: E402
+
+
+def test_close_exits_open_call_at_next_open():
+    p = pred()  # market long at 100, stop 90, target 120, issued 10-01
+    b = bars((101, 104, 99, 103), (103, 106, 102, 105), (108, 110, 100, 101), (99, 100, 95, 96))
+    c = Close(ticker="MU", reason="guide cut", issued_at="2026-10-05T20:00:00+00:00")  # Monday evening
+    o = resolve(p, b, c)
+    assert o.status == "CLOSED_EARLY" and o.exit_date == "2026-10-06" and o.exit_price == 108
+    assert o.r == 0.8 and o.close_reason == "guide cut" and o.resolved
+
+
+def test_close_does_not_override_earlier_stop_or_target():
+    p = pred()
+    b = bars((101, 121, 99, 119), (110, 111, 100, 101))
+    o = resolve(p, b, Close(ticker="MU", issued_at="2026-10-02T21:00:00+00:00"))
+    assert o.status == "TARGET_HIT" and o.closed_by is None
+
+
+def test_close_cancels_untriggered_entry_and_waits_for_next_bar():
+    p = pred(entry=95)
+    b = bars((101, 104, 99, 103), (103, 106, 100, 105))
+    late = Close(ticker="MU", issued_at="2026-10-05T20:00:00+00:00")
+    assert resolve(p, b, late).status == "CLOSING"  # no bar after the close yet
+    early = Close(ticker="MU", issued_at="2026-10-02T20:00:00+00:00")
+    o = resolve(p, b, early)
+    assert o.status == "CANCELLED" and o.r is None and not o.resolved
+
+
+def test_close_matching_and_win_rate(tmp_path):
+    led = mk(tmp_path)
+    a = pred(source_agent="trader")
+    s = pred(direction="short", stop=110, target=80, source_agent="portfolio-manager")
+    other = pred(ticker="LRCX")
+    led.seal([a, s, other])
+    close = Close(ticker="MU", direction="long", reason="thesis broke", issued_at="2026-10-05T20:00:00+00:00")
+    same_time_new = pred(issued_at="2026-10-05T20:00:00+00:00", claim="re-entry")
+    led.seal([close, same_time_new])
+    cm = led.close_map()
+    assert set(cm) == {a.id}  # not the short, not LRCX, not the call made with the close
+    assert all(p.id != close.id for p in led.predictions()) and len(led.closes()) == 1
+
+    b = bars((101, 104, 99, 103), (103, 106, 102, 105), (96, 97, 94, 95), (99, 100, 95, 96))
+    outs = grade_all(led.predictions(), StaticProvider({"MU": b, "LRCX": b}), today=date(2026, 10, 20), closes=cm)
+    assert outs[a.id].status == "CLOSED_EARLY" and outs[a.id].r == -0.4
+    sc = scorecard(led.predictions(), outs)
+    assert sc["overall"]["early_closes"] == 1 and sc["overall"]["early_losses"] == 1
+    assert sc["overall"]["win_rate"] is not None
+
+
+def test_ingest_close_block(tmp_path):
+    led = mk(tmp_path)
+    rep = tmp_path / "runs" / "MU" / "decision.md"
+    rep.parent.mkdir(parents=True)
+    rep.write_text("```prediction\n" + json.dumps({"ticker": "MU", "direction": "long", "stop": 90, "target": 120,
+                   "horizon_days": 10, "confidence": 0.6, "price_at_issue": 100, "source_agent": "pm"}) + "\n```\n")
+    t0 = datetime(2026, 10, 1, 14, tzinfo=timezone.utc)
+    import os
+    os.utime(rep, (t0.timestamp(), t0.timestamp()))
+    ingest_folder(tmp_path / "runs", led, now=t0)
+    rev = tmp_path / "runs" / "MU" / "review.md"
+    rev.write_text('```close\n{"ticker": "MU", "source_agent": "event-reviewer", "reason": "8-K: CEO out"}\n```\n')
+    t1 = t0 + timedelta(days=2)
+    os.utime(rev, (t1.timestamp(), t1.timestamp()))
+    ingest_folder(tmp_path / "runs", led, patterns=("*.md",), now=t1)
+    assert len(led.closes()) == 1 and led.closes()[0].id.startswith("close-MU-event-reviewer-")
+    assert len(led.close_map()) == 1 and led.verify().ok
+
+
+def test_site_shows_closed_early(tmp_path):
+    led = mk(tmp_path, reveal_delay_days=0)
+    p = pred()
+    led.seal([p, Close(ticker="MU", reason="thesis broke", issued_at="2026-10-05T20:00:00+00:00")])
+    b = bars((101, 104, 99, 103), (103, 106, 102, 105), (108, 110, 100, 101))
+    outs = grade_all(led.predictions(), StaticProvider({"MU": b}), today=date(2026, 10, 20), closes=led.close_map())
+    led.reveal_due(resolved_ids={p.id})
+    out = build_site(led, outs, tmp_path / "site")
+    html = (out / "trades.html").read_text()
+    assert "Closed early (1)" in html and "thesis broke" in html
+    assert "Win rate" in (out / "index.html").read_text() and "How calls ended" in (out / "index.html").read_text()
