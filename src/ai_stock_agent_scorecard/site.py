@@ -75,7 +75,7 @@ th:first-child,td:first-child{padding-left:0}td.r,th.r{text-align:right}
 .pill{font-size:12px;font-weight:500;padding:2px 9px;border-radius:999px;white-space:nowrap;display:inline-block}
 .good{background:var(--gainbg);color:var(--gain)}.bad{background:var(--lossbg);color:var(--loss)}.info{background:var(--skybg);color:var(--sky)}
 .warn{background:var(--amberbg);color:var(--amber)}.neutral{background:var(--soft);color:var(--muted)}
-.tk{font-weight:600}.dir{font-size:12px;color:var(--muted);margin-left:4px}.sub{color:var(--muted);font-size:12.5px}
+.tk{font-weight:600}.dir{font-size:11.5px;font-weight:600;margin-left:6px;padding:1px 7px;border-radius:999px;color:var(--muted);background:var(--soft)}.dir.long{color:var(--gain);background:var(--gainbg)}.dir.short{color:var(--loss);background:var(--lossbg)}.sub{color:var(--muted);font-size:12.5px}
 .claim{color:var(--muted);font-size:13px}
 .ins{margin:0;padding:0;list-style:none}.ins li{padding:10px 0 10px 16px;border-bottom:1px solid var(--line);position:relative}
 .ins li:before{content:'';position:absolute;left:0;top:19px;width:6px;height:6px;border-radius:50%;background:var(--sky)}.ins li:last-child{border-bottom:0}
@@ -309,7 +309,7 @@ def build_site(ledger: Ledger, outcomes: dict[str, Outcome], out_dir: str | Path
             if r.get("r") is not None and r["status"] in ("TARGET_HIT", "STOPPED", "EXPIRED", "CLOSED_EARLY"):
                 label = f"{label} {r['r']:+.2f}R"
             badge = f" {position_badge(r['ticker'], positions, as_of)}" if badges else ""
-            rows.append(f"<tr><td><span class='tk'>{e(r['ticker'])}</span><span class='dir'>{e(r['direction'])}</span>{badge}"
+            rows.append(f"<tr><td><span class='tk'>{e(r['ticker'])}</span><span class='dir {e(r['direction'])}'>{e(r['direction'].capitalize())}</span>{badge}"
                         f"<div class='claim'>{e(r['claim'])}</div></td>"
                         f"<td class='hide-s'>{e(r['agent'])}<div class='sub'>{e(_fmt_day(r['issued_at']))}, {r['confidence']:.0%} confident</div></td>"
                         f"<td class='r hide-s'>{r['entry']:,.2f}<div class='sub'>stop {r['stop']:,.2f}, target {r['target']:,.2f}</div></td>"
@@ -452,7 +452,7 @@ function result(t){{const c=t.status==='CLOSED_EARLY'?(t.r>0?'good':'bad'):(tone
  const why=t.early?`<span class='why'>Withdrawn ${{day(t.closed_on)}}${{t.close_reason?': '+esc(t.close_reason):''}}</span>`:'';
  return `${{r}}<span class='pill ${{c}}'>${{t.status_label}}</span>${{why}}`}}
 function render(g){{const rows=T.filter(t=>g==='all'||(g==='early'?t.early:t.group===g));const tb=document.querySelector('#trades tbody');
- tb.innerHTML=rows.map(t=>`<tr><td>${{day(t.called)}}</td><td><span class='tk'>${{t.ticker}}</span><span class='dir'>${{t.direction}}</span></td>
+ tb.innerHTML=rows.map(t=>`<tr><td>${{day(t.called)}}</td><td><span class='tk'>${{t.ticker}}</span><span class='dir ${{t.direction}}'>${{t.direction==='long'?'Long':'Short'}}</span></td>
  <td>${{t.agent}}</td><td class='r'>${{t.entry_plan===null?'Market <span class=sub>'+f(t.price_at_call)+'</span>':f(t.entry_plan)}}</td>
  <td class='r'>${{f(t.stop)}}</td><td class='r'>${{f(t.target)}}</td><td class='r'>${{t.plan_rr===null?'–':f(t.plan_rr)}}</td>
  <td class='r'>${{t.entered_on?f(t.entered_at)+'<div class=sub>'+day(t.entered_on)+'</div>':'–'}}</td>
