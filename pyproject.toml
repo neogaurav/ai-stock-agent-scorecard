@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ai-stock-agent-scorecard"
-version = "0.3.1"
+version = "0.3.2"
 description = "Lookahead-free, verifiable track record for AI stock-research agents (commit-reveal hash chain + scorecard)."
 readme = "README.md"
 requires-python = ">=3.10"
