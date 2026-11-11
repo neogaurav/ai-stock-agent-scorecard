@@ -271,6 +271,9 @@ def build_site(ledger: Ledger, outcomes: dict[str, Outcome], out_dir: str | Path
             early = (f" Of the {o['early_closes']} closed early, {o['early_wins']} finished up and {o['early_losses']} down"
                      + (f", averaging {o['early_avg_r']:+.2f}R." if o["early_avg_r"] is not None else "."))
         cancelled = f" {o['cancelled']} call(s) were withdrawn before entry and take no R." if o["cancelled"] else ""
+        if o.get("reentries"):
+            cancelled += (f" {o['reentries']} call(s) were re-entries after an exit"
+                          + (f"; the {o['reentries_resolved']} resolved average {o['reentry_avg_r']:+.2f}R." if o["reentry_avg_r"] is not None else "."))
         content = (f"<div class='stack' role='img' aria-label='Outcomes of resolved calls'>{bar}</div><ul class='legend'>{legend}</ul>"
                    f"<p class='note'>A win is any call that exits above its entry (below it for a short). A call the agent withdraws "
                    f"after a thesis change exits at the next day's open, never at a price it picks. Target-hit rate, leaving early "
@@ -405,7 +408,7 @@ def trade_rows(preds: list[Prediction], outcomes: dict[str, Outcome]) -> list[di
             "horizon_days": p.horizon_days, "confidence": p.confidence, "claim": p.claim,
             "status": o.status, "status_label": STATUS_LABEL.get(o.status, o.status), "group": GROUP.get(o.status, "open"),
             "entered_on": o.fill_date, "entered_at": o.fill_price, "exited_on": o.exit_date, "exited_at": o.exit_price,
-            "r": o.r, "days_held": held, "early": bool(o.closed_by), "close_reason": o.close_reason,
+            "r": o.r, "days_held": held, "early": bool(o.closed_by), "reentry_of": p.reentry_of, "close_reason": o.close_reason,
             "closed_on": o.closed_on,
         })
     rows.sort(key=lambda r: (r["exited_on"] or "", r["called"]), reverse=True)
@@ -415,15 +418,17 @@ def trade_rows(preds: list[Prediction], outcomes: dict[str, Outcome]) -> list[di
 def trades_body(trades: list[dict[str, Any]]) -> str:
     counts = {g: sum(1 for t in trades if t["group"] == g) for g in ("resolved", "open", "waiting")}
     counts["early"] = sum(1 for t in trades if t["early"])
+    counts["reentry"] = sum(1 for t in trades if t["reentry_of"])
     data = json.dumps(trades).replace("</", "<\\/")
-    tabs = [("resolved", "Resolved"), ("open", "Open"), ("waiting", "Waiting for entry"), ("early", "Closed early"), ("all", "All")]
+    tabs = [("resolved", "Resolved"), ("open", "Open"), ("waiting", "Waiting for entry"), ("early", "Closed early"), ("reentry", "Re-entries"), ("all", "All")]
     tab_html = "".join(f"<button role='tab' data-g='{g}' aria-selected='false'>{label} ({len(trades) if g == 'all' else counts[g]})</button>"
                        for g, label in tabs)
     return f"""
 <div class='hero'><h1>Every revealed call</h1>
 <p class='lede'>What each agent planned, and what the grader saw in daily prices. Grading starts the trading day after the call;
 a day that touches both stop and target counts as stopped; a gap through a level fills at the open. A call the agent withdrew
-after a thesis change exits at the next day's open, or is cancelled if it was never entered.</p></div>
+after a thesis change exits at the next day's open, or is cancelled if it was never entered. A re-entry after an exit must wait
+for a pullback to a new entry level, and waits five trading days after a stop.</p></div>
 <div class='seg' role='tablist'>{tab_html}</div>
 <div class='tw'><table id='trades'>
 <thead><tr><th>Called</th><th>Call</th><th>Agent</th><th class='r'>Planned entry</th><th class='r'>Stop</th><th class='r'>Target</th>
@@ -439,7 +444,7 @@ Download the rows as <a href='data/trades.json'>trades.json</a>.</p>
 .tw{{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:6px 18px}}
 #trades td{{white-space:nowrap}}#trades td:last-child{{white-space:normal;min-width:180px}}
 #trades tbody tr:hover td{{background:var(--paper)}}
-.res{{font:600 17px var(--cond)}}.why{{display:block;color:var(--muted);font-size:12.5px;margin-top:3px;white-space:normal}}
+.res{{font:600 17px var(--cond)}}.re{{font-size:11.5px;margin-left:6px;color:var(--muted);border:1px solid var(--line);padding:0 6px;border-radius:999px}}.why{{display:block;color:var(--muted);font-size:12.5px;margin-top:3px;white-space:normal}}
 </style>
 <script>
 const T={data};
@@ -451,8 +456,8 @@ function result(t){{const c=t.status==='CLOSED_EARLY'?(t.r>0?'good':'bad'):(tone
  const r=t.r===null?'':`<span class='res ${{t.r>0?'pos':t.r<0?'neg':''}}'>${{t.r>0?'+':''}}${{f(t.r)}}R</span> `;
  const why=t.early?`<span class='why'>Withdrawn ${{day(t.closed_on)}}${{t.close_reason?': '+esc(t.close_reason):''}}</span>`:'';
  return `${{r}}<span class='pill ${{c}}'>${{t.status_label}}</span>${{why}}`}}
-function render(g){{const rows=T.filter(t=>g==='all'||(g==='early'?t.early:t.group===g));const tb=document.querySelector('#trades tbody');
- tb.innerHTML=rows.map(t=>`<tr><td>${{day(t.called)}}</td><td><span class='tk'>${{t.ticker}}</span><span class='dir ${{t.direction}}'>${{t.direction==='long'?'Long':'Short'}}</span></td>
+function render(g){{const rows=T.filter(t=>g==='all'||(g==='early'?t.early:g==='reentry'?!!t.reentry_of:t.group===g));const tb=document.querySelector('#trades tbody');
+ tb.innerHTML=rows.map(t=>`<tr><td>${{day(t.called)}}</td><td><span class='tk'>${{t.ticker}}</span><span class='dir ${{t.direction}}'>${{t.direction==='long'?'Long':'Short'}}</span>${{t.reentry_of?'<span class=re title="Re-entry of '+esc(t.reentry_of)+'">Re-entry</span>':''}}</td>
  <td>${{t.agent}}</td><td class='r'>${{t.entry_plan===null?'Market <span class=sub>'+f(t.price_at_call)+'</span>':f(t.entry_plan)}}</td>
  <td class='r'>${{f(t.stop)}}</td><td class='r'>${{f(t.target)}}</td><td class='r'>${{t.plan_rr===null?'–':f(t.plan_rr)}}</td>
  <td class='r'>${{t.entered_on?f(t.entered_at)+'<div class=sub>'+day(t.entered_on)+'</div>':'–'}}</td>

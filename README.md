@@ -75,6 +75,22 @@ live calls on that ticker issued before it, narrowed by `direction`, `agents` or
   on losers to look good is visible. The target-hit rate and calibration leave early closes out, because
   those calls never found out whether the stop or the target would come first.
 
+### Re-entering after an exit
+
+Every call is one trade. After it ends (stop, target, early close or expiry) the scorecard tracks nothing on that
+ticker until an agent makes a new call. `agent-scorecard exits --state seen.json --out exits.json` lists the calls
+that exited since the last run, so your research pipeline can review each one and either stand aside or re-enter.
+
+A re-entry is a normal call with `"reentry_of": "<id of the call that exited>"`, and two rules apply:
+
+- **It waits for a pullback.** It needs a limit `entry` below the current price for a long (above it for a short).
+  Re-buying at market is just the old trade with a moved target, so it is refused.
+- **No revenge trades.** A re-entry of a call that was **stopped out** is refused for `reentry_cooldown_days`
+  (default 5) trading days. A fresh full analysis that issues a new call is not a re-entry and is not blocked.
+
+Re-entries get a tag and their own tab on the Trades page, and their own average R per agent, so you can see
+whether an agent's second bite is any good.
+
 ## Recommended setup (two repos, both free)
 
 1. **`scorecard-data` (private).** Holds `private/` (records and salts) and `public/` (chain and reveals).

@@ -38,6 +38,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Refuse to seal a call issued longer ago than this: a call sealed late could
     # already know part of its outcome. 0 disables the check (demo/backfill only).
     "max_seal_lag_minutes": 120,
+    # A re-entry of a call that was stopped out is refused until this many trading days
+    # after the stop (no revenge trades). A fresh full analysis run is not a re-entry.
+    "reentry_cooldown_days": 5,
 }
 
 

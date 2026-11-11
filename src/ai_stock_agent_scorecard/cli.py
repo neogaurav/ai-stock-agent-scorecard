@@ -5,7 +5,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from . import __version__
@@ -59,6 +59,41 @@ def cmd_seal(args):
     print("Chain verified" if rep.ok else f"Chain problems: {rep.errors}")
 
 
+def cmd_exits(args):
+    """Calls that exited recently, for the research pipeline to review (re-enter on a pullback, or stand aside)."""
+    led = _ledger(args)
+    outcomes = load_outcomes(led)
+    cutoff = (date.today() - timedelta(days=args.days)).isoformat()
+    seen = set(json.loads(Path(args.state).read_text())) if args.state and Path(args.state).exists() else set()
+    cooldown = int(led.config.get("reentry_cooldown_days") or 0)
+    rows = []
+    for p in led.predictions():
+        o = outcomes.get(p.id)
+        if not o or not o.resolved or not o.exit_date or o.exit_date < cutoff or p.id in seen:
+            continue
+        row = {"id": p.id, "ticker": p.ticker, "direction": p.direction, "agent": p.source_agent, "status": o.status,
+               "exit_date": o.exit_date, "exit_price": o.exit_price, "r": o.r, "entry": p.entry_ref, "stop": p.stop,
+               "target": p.target, "claim": p.claim, "thesis_run": p.thesis_run, "reentry_of": p.reentry_of}
+        if o.status == "STOPPED" and cooldown:
+            d, n = date.fromisoformat(o.exit_date), 0
+            while n < cooldown:
+                d += timedelta(days=1)
+                n += d.weekday() < 5
+            row["reentry_allowed_from"] = d.isoformat()
+        rows.append(row)
+    rows.sort(key=lambda r: (r["exit_date"], r["ticker"]))
+    out = json.dumps({"generated": datetime.now().isoformat(timespec="seconds"), "exits": rows}, indent=2)
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(out)
+        print(f"{len(rows)} exit(s) written to {args.out}")
+    else:
+        print(out)
+    if args.state:
+        Path(args.state).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.state).write_text(json.dumps(sorted(seen | {r["id"] for r in rows})))
+
+
 def cmd_close(args):
     led = _ledger(args)
     c = Close(ticker=args.ticker, reason=args.reason, direction=args.direction, ref=args.ref,
@@ -71,7 +106,9 @@ def cmd_close(args):
 
 def cmd_ingest(args):
     patterns = tuple(args.pattern) if args.pattern else ("*.md", "*.txt")
-    summary = ingest_folder(args.folder, _ledger(args), use_llm=args.llm, patterns=patterns, git_commit=args.git)
+    led = _ledger(args)
+    summary = ingest_folder(args.folder, led, use_llm=args.llm, patterns=patterns, git_commit=args.git,
+                            outcomes=load_outcomes(led))
     print(f"Scanned {summary['files']} new/changed file(s), sealed {summary['sealed']} prediction(s)"
           + (f", refused {summary['too_old']} too old to seal fairly" if summary["too_old"] else ""))
     for err in summary["errors"]:
@@ -153,6 +190,12 @@ def main(argv=None):
     p.add_argument("file", nargs="?", default="-")
     p.add_argument("--git", action="store_true", help="git commit public files after sealing")
     p.set_defaults(fn=cmd_seal)
+
+    p = sub.add_parser("exits", help="list calls that exited recently (for re-entry reviews)")
+    p.add_argument("--days", type=int, default=5, help="look back this many calendar days (default 5)")
+    p.add_argument("--state", help="file of already-reported exit ids; only new exits are listed, then recorded")
+    p.add_argument("--out", help="write the JSON here instead of printing it")
+    p.set_defaults(fn=cmd_exits)
 
     p = sub.add_parser("close", help="withdraw earlier calls on a ticker because the thesis changed")
     p.add_argument("ticker")

@@ -53,6 +53,7 @@ class Prediction:
     thesis_run: str | None = None
     acted_on: bool | None = None
     tags: list[str] = field(default_factory=list)
+    reentry_of: str | None = None
     id: str = ""
 
     def __post_init__(self) -> None:
@@ -100,6 +101,15 @@ class Prediction:
             raise ValidationError(f"long needs stop < entry < target (got {self.stop} / {e} / {self.target})")
         if self.direction == "short" and not (self.target < e < self.stop):
             raise ValidationError(f"short needs target < entry < stop (got {self.target} / {e} / {self.stop})")
+        if self.reentry_of:
+            # A re-entry waits for a pullback: a limit below the current price (above it for a short).
+            # Re-buying at market after an exit is just the old trade with a moved target.
+            if self.entry is None:
+                raise ValidationError("a re-entry needs a pullback entry level, not a market entry")
+            if self.direction == "long" and not self.entry < self.price_at_issue:
+                raise ValidationError(f"a long re-entry must wait for a pullback: entry {self.entry} is not below {self.price_at_issue}")
+            if self.direction == "short" and not self.entry > self.price_at_issue:
+                raise ValidationError(f"a short re-entry must wait for a bounce: entry {self.entry} is not above {self.price_at_issue}")
 
     def default_id(self) -> str:
         body = {k: v for k, v in self.to_dict().items() if k != "id"}
@@ -107,7 +117,10 @@ class Prediction:
         return f"{self.ticker}-{self.issued_at[:10]}-{digest}"
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        if d.get("reentry_of") is None:
+            d.pop("reentry_of", None)  # keeps records sealed before re-entries existed hashing the same
+        return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Prediction":

@@ -207,6 +207,9 @@ def _stats(rows: list[tuple[Prediction, Outcome]]) -> dict[str, Any]:
         "early_losses": sum(1 for o in early if not _is_win(o)),
         "early_avg_r": round(mean(early_r), 3) if early_r else None,
         "cancelled": sum(1 for _, o in rows if o.status == CANCELLED),
+        "reentries": sum(1 for p, _ in rows if p.reentry_of),
+        "reentries_resolved": sum(1 for p, _ in res if p.reentry_of),
+        "reentry_avg_r": (round(mean(rr), 3) if (rr := [o.r for p, o in res if p.reentry_of and o.r is not None]) else None),
     }
 
 
@@ -290,6 +293,10 @@ def _insights(agents, calibration, by_agent, min_n) -> list[str]:
         if a.get("early_closes", 0) >= 3 and a.get("early_avg_r") is not None:
             out.append(f"{a['agent']} closed {a['early_closes']} calls early ({a['early_wins']} up, {a['early_losses']} down, "
                        f"{a['early_avg_r']:+.2f}R on average).")
+    for a in agents:
+        if a.get("reentries_resolved", 0) >= 3 and a.get("reentry_avg_r") is not None:
+            out.append(f"{a['agent']}'s {a['reentries_resolved']} resolved re-entries average {a['reentry_avg_r']:+.2f}R "
+                       f"(all its calls: {a['avg_r']:+.2f}R).")
     human = next((a for a in agents if a["agent"] == "human"), None)
     if human and human["avg_r"] is not None and ranked:
         ai = [a for a in ranked if a["agent"] != "human"]

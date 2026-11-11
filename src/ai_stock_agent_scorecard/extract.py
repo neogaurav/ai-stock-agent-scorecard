@@ -117,8 +117,40 @@ def _stable_id(p: Prediction, rel: str, index: int) -> str:
     return f"{prefix}{p.ticker}-{p.source_agent}-{h}"
 
 
+def trading_days_between(start: str, end: str) -> int:
+    """Weekdays after ``start`` up to and including ``end`` (ISO dates)."""
+    from datetime import date, timedelta
+    d, stop, n = date.fromisoformat(start[:10]), date.fromisoformat(end[:10]), 0
+    while d < stop:
+        d += timedelta(days=1)
+        n += d.weekday() < 5
+    return n
+
+
+def reentry_problem(p: Prediction, ledger, outcomes: dict[str, Any] | None) -> str | None:
+    """Why a re-entry can't be sealed yet, or None. ``outcomes`` maps call id to its graded Outcome."""
+    if not getattr(p, "reentry_of", None):
+        return None
+    prev = next((q for q in ledger.predictions() if q.id == p.reentry_of), None)
+    if prev is None:
+        return f"re-entry of unknown call {p.reentry_of}"
+    if prev.ticker != p.ticker:
+        return f"re-entry of {p.reentry_of} is a different ticker ({prev.ticker})"
+    o = (outcomes or {}).get(prev.id)
+    if o is None or not o.resolved:
+        return f"{p.reentry_of} has not exited yet, so there is nothing to re-enter"
+    cooldown = int(ledger.config.get("reentry_cooldown_days") or 0)
+    if o.status == "STOPPED" and cooldown and o.exit_date:
+        n = trading_days_between(o.exit_date, p.issued_at)
+        if n < cooldown:
+            return (f"{p.reentry_of} was stopped out on {o.exit_date}; re-entries wait {cooldown} trading days "
+                    f"(only {n} passed). A fresh full analysis run can still make a new call.")
+    return None
+
+
 def ingest_folder(folder: str | Path, ledger, *, use_llm: bool = False, patterns=("*.md", "*.txt"),
-                  git_commit: bool = False, now: datetime | None = None) -> dict[str, Any]:
+                  git_commit: bool = False, now: datetime | None = None,
+                  outcomes: dict[str, Any] | None = None) -> dict[str, Any]:
     """Seal predictions from every new or changed report in ``folder``.
 
     * A file whose content was ingested before is skipped, so this can run every few minutes.
@@ -154,6 +186,10 @@ def ingest_folder(folder: str | Path, ledger, *, use_llm: bool = False, patterns
                 p.id = _stable_id(p, rel, i)
                 if lag and (now - datetime.fromisoformat(p.issued_at)).total_seconds() > lag * 60:
                     summary["too_old"] += 1
+                    continue
+                why = None if isinstance(p, Close) else reentry_problem(p, ledger, outcomes)
+                if why:
+                    summary["errors"].append(f"{rel}: refused {p.ticker} re-entry: {why}")
                     continue
                 batch.append(p)
     links = ledger.seal(batch, sealed_at=now.replace(microsecond=0).isoformat(), git_commit=git_commit)

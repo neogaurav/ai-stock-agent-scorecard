@@ -335,3 +335,76 @@ def test_site_shows_closed_early(tmp_path):
     html = (out / "trades.html").read_text()
     assert "Closed early (1)" in html and "thesis broke" in html
     assert "Win rate" in (out / "index.html").read_text() and "How calls ended" in (out / "index.html").read_text()
+
+
+# ---------------------------------------------------------------- re-entry
+from ai_stock_agent_scorecard.extract import reentry_problem, trading_days_between  # noqa: E402
+from ai_stock_agent_scorecard.score import Outcome  # noqa: E402
+from ai_stock_agent_scorecard.schema import ValidationError  # noqa: E402
+
+
+def test_reentry_must_wait_for_pullback():
+    import pytest
+    with pytest.raises(ValidationError, match="pullback entry level"):
+        pred(reentry_of="MU-x")
+    with pytest.raises(ValidationError, match="not below"):
+        pred(reentry_of="MU-x", entry=101)
+    ok = pred(reentry_of="MU-x", entry=96)
+    assert ok.to_dict()["reentry_of"] == "MU-x"
+    with pytest.raises(ValidationError, match="bounce"):
+        pred(direction="short", stop=110, target=80, entry=99, reentry_of="MU-x")
+    assert "reentry_of" not in pred().to_dict()  # old records hash exactly as before
+
+
+def test_reentry_cooldown_after_stop(tmp_path):
+    led = mk(tmp_path)
+    first = pred()
+    led.seal([first])
+    stopped = {first.id: Outcome(id=first.id, status="STOPPED", exit_date="2026-10-06", exit_price=90, r=-1.0)}
+    early = pred(reentry_of=first.id, entry=88, stop=80, issued_at="2026-10-08T21:00:00+00:00", price_at_issue=91)
+    assert "wait 5 trading days" in reentry_problem(early, led, stopped)
+    late = pred(reentry_of=first.id, entry=88, stop=80, issued_at="2026-10-13T21:00:00+00:00", price_at_issue=91)
+    assert reentry_problem(late, led, stopped) is None
+    target = {first.id: Outcome(id=first.id, status="TARGET_HIT", exit_date="2026-10-06", exit_price=120, r=2.0)}
+    assert reentry_problem(early, led, target) is None  # no cooldown after a target hit
+    assert "has not exited" in reentry_problem(early, led, {})
+    assert "unknown call" in reentry_problem(pred(reentry_of="nope", entry=96), led, stopped)
+    assert trading_days_between("2026-10-09", "2026-10-12") == 1  # Fri -> Mon
+
+
+def test_ingest_refuses_early_reentry(tmp_path):
+    import os
+    led = mk(tmp_path)
+    first = pred()
+    led.seal([first])
+    outs = {first.id: Outcome(id=first.id, status="STOPPED", exit_date="2026-10-06", exit_price=90, r=-1.0)}
+    rep = tmp_path / "runs" / "MU" / "decision.md"
+    rep.parent.mkdir(parents=True)
+    rep.write_text("```prediction\n" + json.dumps({"ticker": "MU", "direction": "long", "entry": 86, "stop": 80, "target": 110,
+                   "horizon_days": 20, "confidence": 0.5, "price_at_issue": 91, "reentry_of": first.id}) + "\n```\n")
+    t = datetime(2026, 10, 7, 21, tzinfo=timezone.utc)
+    os.utime(rep, (t.timestamp(), t.timestamp()))
+    summary = ingest_folder(tmp_path / "runs", led, now=t, outcomes=outs)
+    assert summary["sealed"] == 0 and "re-entries wait 5 trading days" in summary["errors"][0]
+
+
+def test_exits_command_and_reentry_tab(tmp_path, capsys):
+    from ai_stock_agent_scorecard.cli import main
+    led = mk(tmp_path, reveal_delay_days=0)
+    first = pred()
+    led.seal([first])
+    today = date.today().isoformat()
+    (led.private / "outcomes.json").write_text(json.dumps({first.id: Outcome(
+        id=first.id, status="STOPPED", fill_price=100, fill_date=today, exit_date=today, exit_price=90, r=-1.0).to_dict()}))
+    state = tmp_path / "seen.json"
+    main(["--root", str(tmp_path), "exits", "--state", str(state)])
+    rows = json.loads(capsys.readouterr().out)["exits"]
+    assert rows[0]["id"] == first.id and rows[0]["status"] == "STOPPED" and rows[0]["reentry_allowed_from"] > today
+    main(["--root", str(tmp_path), "exits", "--state", str(state)])
+    assert json.loads(capsys.readouterr().out)["exits"] == []  # reported once
+
+    re = pred(reentry_of=first.id, entry=88, stop=80, price_at_issue=91, issued_at="2026-10-20T21:00:00+00:00")
+    led.seal([re])
+    led.reveal_due(resolved_ids={first.id, re.id})
+    html = (build_site(led, {}, tmp_path / "site") / "trades.html").read_text()
+    assert "Re-entries (1)" in html
